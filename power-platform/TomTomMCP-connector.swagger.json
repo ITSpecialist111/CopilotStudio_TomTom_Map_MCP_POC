@@ -1,0 +1,152 @@
+{
+  "swagger": "2.0",
+  "info": {
+    "title": "TomTom MCP Server",
+    "description": "TomTom geospatial services via MCP (Model Context Protocol). Provides geocoding, routing, traffic, search, and map generation capabilities powered by TomTom APIs deployed on Azure Container Apps.",
+    "version": "1.0.0",
+    "contact": {
+      "name": "TomTom MCP POC",
+      "url": "https://github.com/ITSpecialist111/CopilotStudio_TomTom_Map_MCP_POC"
+    }
+  },
+  "host": "<YOUR_CONTAINER_APP>.azurecontainerapps.io",
+  "basePath": "/",
+  "schemes": ["https"],
+  "consumes": ["application/json"],
+  "produces": ["application/json"],
+  "securityDefinitions": {
+    "api_key": {
+      "type": "apiKey",
+      "in": "header",
+      "name": "tomtom-api-key",
+      "description": "TomTom API Key for authentication"
+    }
+  },
+  "security": [
+    {
+      "api_key": []
+    }
+  ],
+  "paths": {
+    "/health": {
+      "get": {
+        "operationId": "GetHealth",
+        "summary": "Health Check",
+        "description": "Check if the TomTom MCP server is running and healthy",
+        "responses": {
+          "200": {
+            "description": "Server is healthy",
+            "schema": {
+              "type": "object",
+              "properties": {
+                "status": { "type": "string", "description": "Server status (ok)" },
+                "backend": { "type": "string", "description": "Backend type" },
+                "mode": { "type": "string", "description": "Server mode (http)" },
+                "version": { "type": "string", "description": "Server version" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/mcp": {
+      "post": {
+        "operationId": "CallMcpTool",
+        "summary": "Call MCP Tool",
+        "description": "Invoke any TomTom MCP tool via JSON-RPC. Supports geocoding, routing, search, traffic, and map generation.",
+        "parameters": [
+          {
+            "name": "Accept",
+            "in": "header",
+            "required": true,
+            "type": "string",
+            "default": "application/json,text/event-stream",
+            "description": "Must accept both application/json and text/event-stream",
+            "x-ms-visibility": "internal"
+          },
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "type": "object",
+              "required": ["method", "params", "jsonrpc", "id"],
+              "properties": {
+                "method": {
+                  "type": "string",
+                  "description": "MCP method to call. Use 'tools/call' to invoke a tool, or 'tools/list' to list available tools.",
+                  "enum": ["tools/call", "tools/list"],
+                  "default": "tools/call",
+                  "x-ms-visibility": "internal"
+                },
+                "params": {
+                  "type": "object",
+                  "description": "Parameters for the MCP call. For tools/call, include 'name' and 'arguments'.",
+                  "properties": {
+                    "name": {
+                      "type": "string",
+                      "description": "Tool name to invoke",
+                      "enum": [
+                        "tomtom-geocode",
+                        "tomtom-reverse-geocode",
+                        "tomtom-fuzzy-search",
+                        "tomtom-poi-search",
+                        "tomtom-nearby",
+                        "tomtom-routing",
+                        "tomtom-waypoint-routing",
+                        "tomtom-reachable-range",
+                        "tomtom-traffic",
+                        "tomtom-static-map",
+                        "tomtom-dynamic-map"
+                      ]
+                    },
+                    "arguments": {
+                      "type": "object",
+                      "description": "Tool-specific arguments"
+                    }
+                  }
+                },
+                "jsonrpc": {
+                  "type": "string",
+                  "description": "JSON-RPC version, always 2.0",
+                  "default": "2.0",
+                  "x-ms-visibility": "internal"
+                },
+                "id": {
+                  "type": "integer",
+                  "description": "Request identifier",
+                  "default": 1,
+                  "x-ms-visibility": "internal"
+                }
+              }
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful MCP response",
+            "schema": {
+              "type": "string",
+              "description": "Server-Sent Events response containing JSON-RPC result"
+            }
+          }
+        }
+      }
+    }
+  },
+  "definitions": {},
+  "x-ms-connector-metadata": [
+    {
+      "propertyName": "Website",
+      "propertyValue": "https://developer.tomtom.com/"
+    },
+    {
+      "propertyName": "Privacy policy",
+      "propertyValue": "https://www.tomtom.com/privacy/"
+    },
+    {
+      "propertyName": "Categories",
+      "propertyValue": "Data;AI"
+    }
+  ]
+}
