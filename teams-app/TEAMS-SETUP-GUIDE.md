@@ -2,7 +2,7 @@
 
 ## Overview
 
-This guide walks through embedding TomTom interactive maps directly inside Microsoft Teams using:
+This guide walks through embedding TomTom interactive maps inside Microsoft Teams using:
 - **Static map images** inline in Adaptive Cards (always visible in chat)
 - **Stage View** to open the full interactive map inside Teams (no browser redirect)
 - **Personal Tab** for a persistent map view in Teams
@@ -16,14 +16,14 @@ User asks question in Teams
 Copilot Studio Agent
         |
         v
-MCP Server (TomTom Orbis Maps) --> Returns text + data
+MCP Server (TomTom Orbis Maps) --> Returns geocode/search results
         |
         v
-Power Automate Flow
+Power Automate Flow (5 Compose actions)
         |
         v
 Adaptive Card with:
-  1. Static map image (inline preview)
+  1. Static map image (inline preview, tap to expand)
   2. "View Interactive Map" button (opens Stage View inside Teams)
   3. "Open in Browser" button (full portal)
 ```
@@ -34,232 +34,236 @@ Adaptive Card with:
 
 The Teams App allows your interactive map to open inside Teams via Stage View.
 
-### 1a. Create App in Teams Admin Center
-
-1. Go to **Teams Admin Center** → https://admin.teams.microsoft.com
-2. Navigate to **Teams apps** → **Manage apps** → **+ Upload new app**
-3. Before uploading, prepare the manifest:
-
-### 1b. Prepare the Manifest
+### 1a. Prepare the Manifest
 
 1. Open `teams-app/manifest.json`
-2. Replace `{{TEAMS_APP_ID}}` with a new GUID. Generate one:
+2. The manifest is pre-configured with:
+   - **App ID**: `b67c70f7-a0ce-46b4-88e5-e7f137ba2970`
+   - **Schema**: v1.16 (broadest client compatibility)
+   - **Scope**: Personal static tab only
+3. If creating a new app, generate a new GUID:
    ```powershell
    [guid]::NewGuid().ToString()
    ```
-3. Replace `{{TOMTOM_API_KEY}}` with: `KTdUeJdXaeQS4ymsVFYlm7SnpJDF4yBA`
-4. Save the file
 
-### 1c. Create App Package (ZIP)
+### 1b. Create App Package (ZIP)
 
 The Teams app package is a ZIP file containing:
 - `manifest.json`
 - `color.png` (192x192 color icon)
 - `outline.png` (32x32 outline icon)
 
-For the icons, convert the SVG files to PNG:
-- Use any SVG-to-PNG converter for `color.svg` → `color.png` (192x192)
-- And `outline.svg` → `outline.png` (32x32)
-
-Then create the ZIP:
 ```powershell
 cd teams-app
 Compress-Archive -Path manifest.json, color.png, outline.png -DestinationPath TomTomMaps.zip
 ```
 
-### 1d. Upload to Teams
+### 1c. Upload to Teams
 
-1. In Teams Admin Center, upload `TomTomMaps.zip`
-2. Or in Teams client: **Apps** → **Manage your apps** → **Upload a custom app**
-3. Note the **App ID** after upload — you'll need this for Stage View URLs
-
-### 1e. Alternative: Sideload for Testing
-
-1. Open Microsoft Teams
-2. Go to **Apps** → **Manage your apps** → **Upload a custom app** → **Upload for me or my teams**
-3. Select the ZIP file
-4. The app will appear in your personal apps
+1. In Teams Admin Center (https://admin.teams.microsoft.com), upload `TomTomMaps.zip`
+2. Or in Teams client: **Apps** > **Manage your apps** > **Upload a custom app**
+3. Note the **App ID** after upload
 
 ---
 
-## Step 2: Configure Static Map Image URL
+## Step 2: Power Automate Flow Configuration
 
-The TomTom Static Image API generates map PNG images via URL. No server-side code needed — the URL itself generates the image.
-
-### URL Format
-
-```
-https://api.tomtom.com/map/1/staticimage?
-  layer=basic
-  &style=main
-  &format=png
-  &zoom={zoom}
-  &center={longitude},{latitude}
-  &width=600
-  &height=300
-  &key={API_KEY}
-```
-
-### Example
-
-```
-https://api.tomtom.com/map/1/staticimage?layer=basic&style=main&format=png&zoom=14&center=-2.5311,51.7262&width=600&height=300&key=KTdUeJdXaeQS4ymsVFYlm7SnpJDF4yBA
-```
-
-**Note**: `center` parameter uses **longitude,latitude** order (opposite of typical lat,lon).
-
----
-
-## Step 3: Configure Stage View Deep Link
-
-Stage View opens a web page inside Teams in a modal panel. The URL format:
-
-```
-https://teams.microsoft.com/l/stage/{APP_ID}/0?context={encoded_context}
-```
-
-Where `context` is URL-encoded JSON:
-```json
-{
-  "contentUrl": "https://thankful-sky-03359db03.2.azurestaticapps.net/?apiKey=KEY&center=LAT,LON&zoom=14",
-  "websiteUrl": "https://thankful-sky-03359db03.2.azurestaticapps.net/",
-  "name": "TomTom Map"
-}
-```
-
-### Building the Deep Link in Power Automate
-
-Use a Compose action with this expression:
-
-```
-concat(
-  'https://teams.microsoft.com/l/stage/',
-  '{YOUR_APP_ID}',
-  '/0?context=',
-  encodeUriComponent(
-    concat(
-      '{"contentUrl":"https://thankful-sky-03359db03.2.azurestaticapps.net/?apiKey=KTdUeJdXaeQS4ymsVFYlm7SnpJDF4yBA&center=',
-      variables('latitude'), ',', variables('longitude'),
-      '&zoom=14","websiteUrl":"https://thankful-sky-03359db03.2.azurestaticapps.net/","name":"TomTom Map"}'
-    )
-  )
-)
-```
-
----
-
-## Step 4: Power Automate Flow Configuration
+This is the recommended flow structure with 5 Compose actions that build fully dynamic Adaptive Cards.
 
 ### Flow Structure
 
 ```
-Trigger: When an agent calls the flow
-  Input: text (String) - Agent's response text with location data
-    |
-    v
-Compose: Build Adaptive Card
-    |
-    v
-Return value to agent: card JSON
+Trigger: "When an agent calls the flow"
+  Inputs (5):
+    - text    = Description (auto-fill from geocode freeformAddress)
+    - text_1  = Latitude (auto-fill from position.lat)
+    - text_2  = Longitude (auto-fill from position.lon)
+    - text_3  = Zoom level (auto-fill, default 13)
+    - text_4  = Title (auto-fill from street name or location)
+        |
+        v
+Compose: StaticMapUrl (expression)
+        |
+        v
+Compose: InteractiveMapUrl (expression)
+        |
+        v
+Compose: StageViewUrl (expression)
+        |
+        v
+Compose: AdaptiveCard (JSON with @{outputs(...)} references)
+        |
+        v
+"Respond to the agent": output = AdaptiveCard
 ```
 
-### Compose Action - Adaptive Card with Static Map
+### Flow Input Descriptions
 
-Paste this in the Compose action's Inputs field. Replace:
-- `{APP_ID}` with your Teams App ID
-- The coordinates in the static map URL and interactive URL with dynamic expressions if available
+**Critical**: Add these descriptions to each trigger input so the agent auto-fills them from the MCP tool results. The phrase **"Auto-fill, never ask the user"** prevents the agent from prompting the user for each value.
+
+| Input | Display Name | Description |
+|-------|-------------|-------------|
+| `text` | Description | Brief description of the location. Auto-fill from the geocode or search result address. |
+| `text_1` | Latitude | The latitude from the geocode/search position.lat field. Auto-fill, never ask the user. |
+| `text_2` | Longitude | The longitude from the geocode/search position.lon field. Auto-fill, never ask the user. |
+| `text_3` | Zoom | Map zoom level, default 13. Auto-fill, never ask the user. |
+| `text_4` | Title | Short title for the card, e.g. the street name or location name. Auto-fill, never ask the user. |
+
+### Compose 1: StaticMapUrl
+
+Use the **expression editor** (`fx` button) and paste this single expression:
+
+```
+concat('https://api.tomtom.com/map/1/staticimage?layer=basic&style=main&format=png&zoom=',coalesce(triggerBody()?['text_3'],'13'),'&center=',triggerBody()?['text_2'],',',triggerBody()?['text_1'],'&width=600&height=300&key=YOUR_TOMTOM_API_KEY')
+```
+
+**Note**: The Static Image API uses `center=longitude,latitude` order.
+
+### Compose 2: InteractiveMapUrl
+
+Expression:
+
+```
+concat('https://thankful-sky-03359db03.2.azurestaticapps.net/?apiKey=YOUR_TOMTOM_API_KEY&center=',triggerBody()?['text_1'],',',triggerBody()?['text_2'],'&zoom=',coalesce(triggerBody()?['text_3'],'13'))
+```
+
+**Note**: The interactive map app uses `center=latitude,longitude` order.
+
+### Compose 3: StageViewUrl
+
+Expression:
+
+```
+concat('https://teams.microsoft.com/l/stage/b67c70f7-a0ce-46b4-88e5-e7f137ba2970/0?context=',encodeUriComponent(concat('{"contentUrl":"',outputs('InteractiveMapUrl'),'","websiteUrl":"https://thankful-sky-03359db03.2.azurestaticapps.net/","name":"TomTom Map"}')))
+```
+
+Replace `b67c70f7-a0ce-46b4-88e5-e7f137ba2970` with your Teams App ID if different.
+
+### Compose 4: AdaptiveCard
+
+Paste this JSON directly into the **Inputs text field** (NOT the expression editor). The `@{...}` expressions resolve at runtime:
 
 ```json
 {
   "type": "AdaptiveCard",
-  "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+  "$schema": "https://adaptivecards.io/schemas/adaptive-card.json",
   "version": "1.5",
   "body": [
     {
-      "type": "TextBlock",
-      "text": "TomTom Map",
-      "size": "Large",
-      "weight": "Bolder",
-      "wrap": true
+      "type": "ColumnSet",
+      "columns": [
+        {
+          "type": "Column",
+          "width": "auto",
+          "items": [
+            {
+              "type": "Icon",
+              "name": "Location",
+              "size": "Large",
+              "color": "Accent",
+              "style": "Filled"
+            }
+          ],
+          "verticalContentAlignment": "Center"
+        },
+        {
+          "type": "Column",
+          "width": "stretch",
+          "items": [
+            {
+              "type": "TextBlock",
+              "text": "@{coalesce(triggerBody()?['text_4'], 'Map Result')}",
+              "size": "Large",
+              "weight": "Bolder",
+              "wrap": true
+            }
+          ]
+        }
+      ]
     },
     {
       "type": "Image",
-      "url": "https://api.tomtom.com/map/1/staticimage?layer=basic&style=main&format=png&zoom=13&center=-0.1278,51.5074&width=600&height=300&key=KTdUeJdXaeQS4ymsVFYlm7SnpJDF4yBA",
+      "url": "@{outputs('StaticMapUrl')}",
       "size": "Stretch",
-      "altText": "Map preview"
+      "altText": "Map preview",
+      "msTeams": {
+        "allowExpand": true
+      }
     },
     {
       "type": "TextBlock",
       "text": "@{triggerBody()?['text']}",
       "wrap": true,
       "spacing": "Small"
+    },
+    {
+      "type": "FactSet",
+      "facts": [
+        {
+          "title": "Coordinates",
+          "value": "@{triggerBody()?['text_1']}, @{triggerBody()?['text_2']}"
+        }
+      ]
     }
   ],
   "actions": [
     {
       "type": "Action.OpenUrl",
       "title": "View Interactive Map",
-      "url": "https://thankful-sky-03359db03.2.azurestaticapps.net/?apiKey=KTdUeJdXaeQS4ymsVFYlm7SnpJDF4yBA&center=51.5074,-0.1278&zoom=13",
-      "style": "positive"
+      "url": "@{outputs('StageViewUrl')}",
+      "iconUrl": "icon:Map,filled"
+    },
+    {
+      "type": "Action.OpenUrl",
+      "title": "Open in Browser",
+      "url": "@{outputs('InteractiveMapUrl')}",
+      "iconUrl": "icon:Globe,filled"
     }
   ]
 }
 ```
 
-### For Dynamic Coordinates
+### Compose 5: Respond to the agent
 
-If you want to extract coordinates from the agent's text dynamically, you have two options:
-
-**Option A: Pass coordinates as separate flow inputs**
-
-Add inputs to the flow trigger:
-- `text` (String) - Description text
-- `latitude` (String) - Latitude value
-- `longitude` (String) - Longitude value
-- `zoom` (String) - Zoom level (default "13")
-
-Then use expressions in the Compose:
-```
-Static map URL: https://api.tomtom.com/map/1/staticimage?layer=basic&style=main&format=png&zoom=@{coalesce(triggerBody()?['text_3'],'13')}&center=@{triggerBody()?['text_2']},@{triggerBody()?['text_1']}&width=600&height=300&key=KTdUeJdXaeQS4ymsVFYlm7SnpJDF4yBA
-
-Interactive map URL: https://thankful-sky-03359db03.2.azurestaticapps.net/?apiKey=KTdUeJdXaeQS4ymsVFYlm7SnpJDF4yBA&center=@{triggerBody()?['text_1']},@{triggerBody()?['text_2']}&zoom=@{coalesce(triggerBody()?['text_3'],'13')}
-```
-
-**Option B: Use a fixed default map with the text overlay**
-
-Use the simple version from Step 4 above with a default London center. The text description from the agent gives context, and the "View Interactive Map" button lets users explore.
+Set the output to `@{outputs('AdaptiveCard')}`.
 
 ---
 
-## Step 5: Copilot Studio Agent Configuration
+## Step 3: Copilot Studio Agent Configuration
 
 ### Agent Instructions
 
-Add this to your Copilot Studio agent instructions:
+Add this to your Copilot Studio agent's system instructions:
 
 ```
 When the user asks about locations, maps, routes, or places:
-1. Use the TomTom MCP tools to get the information
-2. After getting results, call the "Generate Map Card" flow with the result text
-3. Present the Adaptive Card response to the user
-
-Always include coordinates when describing locations so they can be mapped.
+1. First call tomtom-geocode or tomtom-search to get the location data
+2. Then automatically call the Generate Map Card flow with ALL inputs filled from the tool results:
+   - text: the freeformAddress from the result
+   - text_1: position.lat from the result
+   - text_2: position.lon from the result
+   - text_3: 13 (default zoom)
+   - text_4: the street name or municipality from the result
+3. NEVER ask the user for coordinates, zoom, or title - always fill them from the geocode results
+4. Do NOT call the flow more than once per request
 ```
 
 ### Topic Configuration
 
-1. Create a topic "Map Results" or add to your existing Generative AI topic
-2. After the MCP tool responds, add a "Call an action" node
-3. Select your Power Automate flow
-4. Pass the `Activity.Text` or MCP response as the `text` input
-5. Add a "Send a message" node after the flow
-6. In the message, select "Adaptive Card" and use the flow output
+1. After the MCP tool responds, add a **"Call an action"** node → select your Power Automate flow
+2. Map the inputs from the MCP tool results (the agent orchestrator handles this based on the instructions above)
+3. After the flow returns, add a **"Send a message"** node
+4. Select **Adaptive Card** as the format and use the flow output variable
+
+**Important**: Remove any hardcoded Adaptive Card templates from the topic. The card should come entirely from the Power Automate flow output.
 
 ---
 
-## Step 6: Deploy Updated Interactive Map
+## Step 4: Deploy Interactive Map App
 
-The interactive map has been updated with Microsoft Teams SDK integration. Redeploy to Azure Static Web Apps:
+The interactive map uses MapLibre GL JS with TomTom vector tiles and Teams SDK integration.
+
+### Deploy to Azure Static Web Apps
 
 ```bash
 cd interactive-map-app
@@ -268,29 +272,41 @@ npx @azure/static-web-apps-cli deploy . \
   --env production
 ```
 
+### Key Technical Details
+
+- **MapLibre GL JS** renders the map (TomTom SDK v5 has iframe sandbox issues in Teams)
+- **Vector style URL**: `https://api.tomtom.com/style/1/style/22.2.1-*?map=2/basic_street-light&poi=2/poi_light&key={key}`
+  - Traffic layers (`traffic_flow`, `traffic_incidents`) cause 404 when included — use map+POI only
+- **CSP header**: `frame-ancestors *` required for Teams iframe embedding
+- **Cache-Control**: `no-cache, no-store, must-revalidate` to prevent stale CSP caching
+- **Teams SDK v2.31.1**: 3-second timeout race on `initialize()`, calls `notifyAppLoaded()` immediately
+
 ---
 
-## Testing
+## Step 5: Testing
 
 ### Test 1: Static Map Image
-Open this URL in a browser to verify the static map API works:
+
+Open this URL in a browser (replace coordinates and key):
 ```
-https://api.tomtom.com/map/1/staticimage?layer=basic&style=main&format=png&zoom=14&center=-2.5311,51.7262&width=600&height=300&key=KTdUeJdXaeQS4ymsVFYlm7SnpJDF4yBA
+https://api.tomtom.com/map/1/staticimage?layer=basic&style=main&format=png&zoom=14&center={lon},{lat}&width=600&height=300&key=YOUR_TOMTOM_API_KEY
 ```
 
 ### Test 2: Interactive Map in Teams
-1. Open Teams
-2. Send yourself the Adaptive Card via the bot
-3. Click "View Interactive Map"
-4. Verify it opens inside Teams (Stage View) or in a new tab
 
-### Test 3: End-to-End
-1. In Teams, ask the Copilot agent: "Show me EV chargers near Lydney"
+1. Open Teams
+2. Go to **Apps** > find **TomTom Maps** > open the personal tab
+3. Verify the map loads with vector tiles, POIs, and pan/zoom
+
+### Test 3: End-to-End Flow
+
+1. In Teams, ask the Copilot agent: "Show me a map of Lydney, England"
 2. Verify you see:
-   - Text response with locations
-   - Static map image inline
-   - "View Interactive Map" button
-   - Interactive map opens inside Teams when clicked
+   - Adaptive Card with location icon and title
+   - Static map image inline (tap to expand)
+   - Description text and coordinates
+   - "View Interactive Map" button (opens Stage View inside Teams)
+   - "Open in Browser" button (opens external browser)
 
 ---
 
@@ -299,7 +315,63 @@ https://api.tomtom.com/map/1/staticimage?layer=basic&style=main&format=png&zoom=
 | Issue | Solution |
 |-------|----------|
 | Static map image not showing | Check API key is valid. Verify `center` uses lon,lat order |
-| Stage View not opening | Ensure Teams App is installed and App ID matches |
+| Stage View not opening | Ensure Teams App is installed and App ID matches in StageViewUrl |
 | "This app cannot be found" | App hasn't been approved in Teams Admin Center |
-| Map blank in Teams iframe | Check CSP headers allow `frame-ancestors` from Teams domains |
+| Map blank in Teams iframe | Check CSP headers: `frame-ancestors *` must be set |
 | Interactive map loads but no tiles | API key may be expired or rate-limited |
+| Agent asks for coordinates | Add "Auto-fill, never ask the user" to flow input descriptions |
+| Card shows `{Topic.VariableName}` as literal text | Use flow output directly, don't put variable placeholders in Copilot Studio card editor |
+| Cardiff Castle showing in results | Remove hardcoded Adaptive Card template from Copilot Studio topic |
+| Cached old CSP blocking iframe | Clear browser cache or wait; headers are set to `no-cache` |
+| Flow called multiple times | Add instruction to agent: "Do NOT call the flow more than once per request" |
+
+---
+
+## Adaptive Card Features Reference
+
+The Adaptive Card uses these Teams-supported elements:
+
+| Element | Purpose |
+|---------|---------|
+| `Icon` (Fluent) | Location pin icon in card header |
+| `Image` with `msTeams.allowExpand` | Static map preview, tap to expand full-screen |
+| `FactSet` | Display coordinates |
+| `Action.OpenUrl` with `iconUrl` | Buttons with Map and Globe Fluent icons |
+
+### Additional Adaptive Card elements available in Teams
+
+| Element | Description |
+|---------|-------------|
+| `Carousel` (v1.6) | Swipeable pages — useful for multi-result cards |
+| `Chart.Donut/Line/Bar/Pie` | Inline data visualization charts |
+| `CodeBlock` | Syntax-highlighted code (desktop/web only) |
+| `Rating` / `Input.Rating` | Star ratings |
+| `Badge` | Compact colored labels |
+| `CompoundButton` | Buttons with icon + title + description |
+| `Layout.AreaGrid` | CSS Grid-style responsive layout |
+
+**Note**: Adaptive Cards cannot embed interactive web content (no iframes, HTML, or JavaScript). The interactive map must be opened via Stage View or browser link.
+
+---
+
+## Roadmap
+
+### Live Share SDK
+
+Integrate `@microsoft/live-share` into the interactive map for collaborative multi-user map viewing in Teams meetings and chats:
+- **Shared pan/zoom** (`LiveState`) — presenter controls everyone's map view
+- **Presence indicators** (`LivePresence`) — see who's viewing and where
+- **Follow mode** (`LiveFollowMode`) — attendees follow the presenter
+- **Annotations** (`LiveCanvas`) — draw and point on the map together
+
+Requires Teams manifest update for meeting contexts (`meetingStage`, `sidePanel`).
+
+See: https://learn.microsoft.com/en-us/microsoftteams/platform/apps-in-teams-meetings/teams-live-share-overview
+
+### TomTom Assets API
+
+Use the TomTom Assets API for:
+- **Style switching** — dark mode, satellite view
+- **Custom sprites** — custom marker icons for different POI types
+
+See: https://developer.tomtom.com/assets-api/api-explorer

@@ -1,7 +1,8 @@
 {
   "type": "AdaptiveCard",
-  "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+  "$schema": "https://adaptivecards.io/schemas/adaptive-card.json",
   "version": "1.5",
+  "_comment": "Dynamic template for Power Automate. All @{...} expressions resolve at runtime.",
   "body": [
     {
       "type": "ColumnSet",
@@ -11,10 +12,11 @@
           "width": "auto",
           "items": [
             {
-              "type": "Image",
-              "url": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIzMiIgaGVpZ2h0PSIzMiIgdmlld0JveD0iMCAwIDMyIDMyIj48Y2lyY2xlIGN4PSIxNiIgY3k9IjE2IiByPSIxNSIgZmlsbD0iIzAwM0Q2QiIvPjxwYXRoIGQ9Ik0xNiA2QzEyLjE0IDYgOSA5LjE0IDkgMTNjMCA1LjI1IDcgMTMgNyAxM3M3LTcuNzUgNy0xM2MwLTMuODYtMy4xNC03LTctN3ptMCA5LjVjLTEuMzggMC0yLjUtMS4xMi0yLjUtMi41czEuMTItMi41IDIuNS0yLjUgMi41IDEuMTIgMi41IDIuNS0xLjEyIDIuNS0yLjUgMi41eiIgZmlsbD0iI2ZmZiIvPjwvc3ZnPg==",
-              "width": "24px",
-              "height": "24px"
+              "type": "Icon",
+              "name": "Location",
+              "size": "Large",
+              "color": "Accent",
+              "style": "Filled"
             }
           ],
           "verticalContentAlignment": "Center"
@@ -25,42 +27,52 @@
           "items": [
             {
               "type": "TextBlock",
-              "text": "${title}",
-              "size": "Medium",
+              "text": "@{coalesce(triggerBody()?['text_4'], 'Map Result')}",
+              "size": "Large",
               "weight": "Bolder",
               "wrap": true
             }
-          ],
-          "verticalContentAlignment": "Center"
+          ]
         }
       ]
     },
     {
       "type": "Image",
-      "url": "${staticMapUrl}",
+      "url": "@{outputs('StaticMapUrl')}",
       "size": "Stretch",
-      "altText": "Map view: ${title}",
-      "spacing": "Small"
+      "altText": "Map preview",
+      "msTeams": {
+        "allowExpand": true
+      }
     },
     {
       "type": "TextBlock",
-      "text": "${description}",
+      "text": "@{triggerBody()?['text']}",
       "wrap": true,
-      "spacing": "Small",
-      "size": "Small"
+      "spacing": "Small"
+    },
+    {
+      "type": "FactSet",
+      "facts": [
+        {
+          "title": "Coordinates",
+          "value": "@{triggerBody()?['text_1']}, @{triggerBody()?['text_2']}"
+        }
+      ]
     }
   ],
   "actions": [
     {
       "type": "Action.OpenUrl",
       "title": "View Interactive Map",
-      "url": "${interactiveMapUrl}",
-      "style": "positive"
+      "url": "@{outputs('StageViewUrl')}",
+      "iconUrl": "icon:Map,filled"
     },
     {
       "type": "Action.OpenUrl",
       "title": "Open in Browser",
-      "url": "${interactiveMapUrl}"
+      "url": "@{outputs('InteractiveMapUrl')}",
+      "iconUrl": "icon:Globe,filled"
     }
   ]
 }
