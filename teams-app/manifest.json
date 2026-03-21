@@ -44,7 +44,6 @@
   "devicePermissions": [],
   "defaultInstallScope": "personal",
   "defaultGroupCapability": {
-    "team": "tab",
-    "groupChat": "tab"
+    "team": "tab"
   }
 }
