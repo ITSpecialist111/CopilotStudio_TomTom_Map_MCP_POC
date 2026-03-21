@@ -2,8 +2,8 @@
   "swagger": "2.0",
   "info": {
     "title": "TomTom MCP Server",
-    "description": "TomTom geospatial services via MCP (Model Context Protocol). Provides geocoding, routing, traffic, search, and map generation capabilities powered by TomTom APIs deployed on Azure Container Apps.",
-    "version": "1.0.0",
+    "description": "TomTom geospatial services via MCP (Model Context Protocol) powered by Orbis Maps. Provides geocoding, routing, traffic, search, EV routing, interactive map generation, and data visualization capabilities deployed on Azure Container Apps.",
+    "version": "2.0.0",
     "contact": {
       "name": "TomTom MCP POC",
       "url": "https://github.com/ITSpecialist111/CopilotStudio_TomTom_Map_MCP_POC"
@@ -53,7 +53,7 @@
       "post": {
         "operationId": "CallMcpTool",
         "summary": "Call MCP Tool",
-        "description": "Invoke any TomTom MCP tool via JSON-RPC. Supports geocoding, routing, search, traffic, and map generation.",
+        "description": "Invoke any TomTom MCP tool via JSON-RPC. Supports geocoding, routing, EV routing, search, traffic, interactive maps, and data visualization via Orbis Maps.",
         "parameters": [
           {
             "name": "Accept",
@@ -96,8 +96,13 @@
                         "tomtom-waypoint-routing",
                         "tomtom-reachable-range",
                         "tomtom-traffic",
-                        "tomtom-static-map",
-                        "tomtom-dynamic-map"
+                        "tomtom-dynamic-map",
+                        "tomtom-ev-routing",
+                        "tomtom-search-along-route",
+                        "tomtom-area-search",
+                        "tomtom-ev-search",
+                        "tomtom-data-viz",
+                        "tomtom-waypoint-optimization"
                       ]
                     },
                     "arguments": {
@@ -129,6 +134,94 @@
               "type": "string",
               "description": "Server-Sent Events response containing JSON-RPC result"
             }
+          }
+        }
+      }
+    },
+    "/api/generate-map-card": {
+      "post": {
+        "operationId": "GenerateMapCard",
+        "summary": "Generate Interactive Map Card",
+        "description": "Generate an Adaptive Card with map visualization for Teams. Calls the specified TomTom MCP tool and returns the result wrapped in an Adaptive Card JSON structure suitable for display in Microsoft Teams.",
+        "parameters": [
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "type": "object",
+              "required": ["tool", "arguments"],
+              "properties": {
+                "tool": {
+                  "type": "string",
+                  "description": "The TomTom MCP tool to invoke for map generation",
+                  "enum": [
+                    "tomtom-geocode",
+                    "tomtom-reverse-geocode",
+                    "tomtom-fuzzy-search",
+                    "tomtom-poi-search",
+                    "tomtom-nearby",
+                    "tomtom-routing",
+                    "tomtom-waypoint-routing",
+                    "tomtom-reachable-range",
+                    "tomtom-traffic",
+                    "tomtom-dynamic-map",
+                    "tomtom-ev-routing",
+                    "tomtom-search-along-route",
+                    "tomtom-area-search",
+                    "tomtom-ev-search",
+                    "tomtom-data-viz",
+                    "tomtom-waypoint-optimization"
+                  ]
+                },
+                "arguments": {
+                  "type": "object",
+                  "description": "Tool-specific arguments to pass to the MCP tool"
+                },
+                "title": {
+                  "type": "string",
+                  "description": "Optional title for the Adaptive Card header"
+                }
+              }
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Adaptive Card JSON for Teams display",
+            "schema": {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "description": "Adaptive Card type identifier"
+                },
+                "version": {
+                  "type": "string",
+                  "description": "Adaptive Card schema version"
+                },
+                "body": {
+                  "type": "array",
+                  "description": "Adaptive Card body elements including map visualization",
+                  "items": {
+                    "type": "object"
+                  }
+                },
+                "actions": {
+                  "type": "array",
+                  "description": "Adaptive Card action buttons",
+                  "items": {
+                    "type": "object"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request - missing or invalid parameters"
+          },
+          "500": {
+            "description": "Server error during map generation"
           }
         }
       }

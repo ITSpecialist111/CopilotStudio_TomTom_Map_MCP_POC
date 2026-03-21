@@ -1,0 +1,42 @@
+{
+  "version": "2.0",
+  "extensionBundle": {
+    "id": "Microsoft.Azure.Functions.ExtensionBundle",
+    "version": "[4.*, 5.0.0)"
+  },
+  "logging": {
+    "applicationInsights": {
+      "samplingSettings": {
+        "isEnabled": true,
+        "excludedTypes": "Request"
+      }
+    },
+    "logLevel": {
+      "default": "Information",
+      "Host.Results": "Error",
+      "Function": "Information",
+      "Host.Aggregator": "Trace"
+    }
+  },
+  "extensions": {
+    "http": {
+      "routePrefix": "api"
+    }
+  },
+  "cors": {
+    "allowedOrigins": [
+      "https://teams.microsoft.com",
+      "https://*.teams.microsoft.com",
+      "https://*.botframework.com",
+      "https://*.microsoftapp.net",
+      "https://copilotstudio.microsoft.com",
+      "https://*.copilotstudio.microsoft.com",
+      "https://make.powerautomate.com",
+      "https://flow.microsoft.com",
+      "http://localhost:3000",
+      "http://localhost:4280",
+      "http://localhost:7071"
+    ],
+    "supportCredentials": true
+  }
+}

@@ -124,6 +124,115 @@ public class TomTomClient
         return results;
     }
 
+    public async Task<List<LocationItem>> SearchEvChargingAsync(double lat, double lon, int radius = 5000)
+    {
+        var response = await CallMcpToolAsync("tomtom-ev-search", new { lat, lon, radius });
+        var results = new List<LocationItem>();
+        if (response?.Results == null) return results;
+
+        foreach (var r in response.Results)
+        {
+            var name = r.Poi?.Name ?? r.Address?.FreeformAddress ?? "EV Charging Station";
+            results.Add(new LocationItem
+            {
+                Id = r.Id ?? Guid.NewGuid().ToString("N"),
+                Name = name,
+                Address = r.Address?.FreeformAddress ?? "",
+                Street = r.Address?.StreetName ?? "",
+                City = r.Address?.Municipality ?? "",
+                Country = r.Address?.Country ?? "",
+                CountryCode = r.Address?.CountryCode ?? "",
+                PostalCode = r.Address?.PostalCode ?? "",
+                Latitude = r.Position?.Lat ?? 0,
+                Longitude = r.Position?.Lon ?? 0,
+                Type = "EV Charging",
+                Category = "EV Charging Station",
+                Phone = r.Poi?.Phone ?? "",
+                Url = r.Poi?.Url ?? "",
+                EvConnectorTypes = r.ChargingPark?.ConnectorTypes ?? "",
+                EvPowerKw = r.ChargingPark?.PowerKw ?? "",
+                EvAvailability = r.ChargingPark?.Availability ?? "",
+                Source = "TomTom EV Search",
+                LastUpdated = DateTime.UtcNow
+            });
+        }
+
+        return results;
+    }
+
+    public async Task<List<LocationItem>> SearchAlongRouteAsync(string origin, string destination, string query, int maxDetourTime = 600)
+    {
+        var response = await CallMcpToolAsync("tomtom-search-along-route", new
+        {
+            origin,
+            destination,
+            query,
+            maxDetourTime
+        });
+
+        var results = new List<LocationItem>();
+        if (response?.Results == null) return results;
+
+        foreach (var r in response.Results)
+        {
+            var name = r.Poi?.Name ?? r.Address?.FreeformAddress ?? query;
+            results.Add(new LocationItem
+            {
+                Id = r.Id ?? Guid.NewGuid().ToString("N"),
+                Name = name,
+                Address = r.Address?.FreeformAddress ?? "",
+                Street = r.Address?.StreetName ?? "",
+                City = r.Address?.Municipality ?? "",
+                Country = r.Address?.Country ?? "",
+                CountryCode = r.Address?.CountryCode ?? "",
+                PostalCode = r.Address?.PostalCode ?? "",
+                Latitude = r.Position?.Lat ?? 0,
+                Longitude = r.Position?.Lon ?? 0,
+                Type = "POI",
+                Category = r.Poi?.CategorySet?.FirstOrDefault()?.Name ?? query,
+                Phone = r.Poi?.Phone ?? "",
+                Url = r.Poi?.Url ?? "",
+                Source = "TomTom Search Along Route",
+                LastUpdated = DateTime.UtcNow
+            });
+        }
+
+        return results;
+    }
+
+    public async Task<List<LocationItem>> AreaSearchAsync(string bbox, string query, int limit = 10)
+    {
+        var response = await CallMcpToolAsync("tomtom-area-search", new { bbox, query, limit });
+        var results = new List<LocationItem>();
+        if (response?.Results == null) return results;
+
+        foreach (var r in response.Results)
+        {
+            var name = r.Poi?.Name ?? r.Address?.FreeformAddress ?? query;
+            results.Add(new LocationItem
+            {
+                Id = r.Id ?? Guid.NewGuid().ToString("N"),
+                Name = name,
+                Address = r.Address?.FreeformAddress ?? "",
+                Street = r.Address?.StreetName ?? "",
+                City = r.Address?.Municipality ?? "",
+                Country = r.Address?.Country ?? "",
+                CountryCode = r.Address?.CountryCode ?? "",
+                PostalCode = r.Address?.PostalCode ?? "",
+                Latitude = r.Position?.Lat ?? 0,
+                Longitude = r.Position?.Lon ?? 0,
+                Type = "POI",
+                Category = r.Poi?.CategorySet?.FirstOrDefault()?.Name ?? query,
+                Phone = r.Poi?.Phone ?? "",
+                Url = r.Poi?.Url ?? "",
+                Source = "TomTom Area Search",
+                LastUpdated = DateTime.UtcNow
+            });
+        }
+
+        return results;
+    }
+
     private async Task<TomTomSearchResponse?> CallMcpToolAsync(string toolName, object arguments)
     {
         var body = new
@@ -185,6 +294,7 @@ public class TomTomResult
     public TomTomAddress? Address { get; set; }
     public TomTomPosition? Position { get; set; }
     public TomTomPoi? Poi { get; set; }
+    public TomTomChargingPark? ChargingPark { get; set; }
 }
 
 public class TomTomReverseResult
@@ -224,4 +334,11 @@ public class TomTomCategory
 {
     public int Id { get; set; }
     public string? Name { get; set; }
+}
+
+public class TomTomChargingPark
+{
+    public string? ConnectorTypes { get; set; }
+    public string? PowerKw { get; set; }
+    public string? Availability { get; set; }
 }

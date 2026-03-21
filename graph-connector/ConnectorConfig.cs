@@ -41,6 +41,16 @@ public class ConnectorConfig
     /// </summary>
     public int PoiLimitPerCategory { get; set; } = 5;
 
+    /// <summary>
+    /// Whether to index EV charging stations near each office.
+    /// </summary>
+    public bool IncludeEvCharging { get; set; } = true;
+
+    /// <summary>
+    /// Radius in meters to search for EV charging stations near each office.
+    /// </summary>
+    public int EvSearchRadius { get; set; } = 5000;
+
     public static ConnectorConfig Load(string path = "appsettings.json")
     {
         if (!File.Exists(path))

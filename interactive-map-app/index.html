@@ -1,0 +1,1023 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="X-UA-Compatible" content="ie=edge">
+    <title>TomTom Interactive Map</title>
+
+    <!-- TomTom Maps SDK -->
+    <link rel="stylesheet" href="https://api.tomtom.com/maps-sdk-for-web/cdn/5.x/5.73.0/maps/maps.css">
+    <script src="https://api.tomtom.com/maps-sdk-for-web/cdn/5.x/5.73.0/maps/maps-web.min.js"></script>
+
+    <!-- MapLibre GL JS fallback -->
+    <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@5.2.0/dist/maplibre-gl.css">
+    <script src="https://unpkg.com/maplibre-gl@5.2.0/dist/maplibre-gl.js"></script>
+
+    <style>
+        *, *::before, *::after {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        :root {
+            --header-height: 48px;
+            --bg-primary: #ffffff;
+            --bg-secondary: #f4f5f7;
+            --text-primary: #1a1a2e;
+            --text-secondary: #555770;
+            --accent: #003d6b;
+            --accent-light: #0074d9;
+            --border: #dde0e4;
+            --shadow: 0 2px 8px rgba(0,0,0,0.10);
+            --error-bg: #fef2f2;
+            --error-text: #991b1b;
+            --error-border: #fecaca;
+        }
+
+        .dark-theme {
+            --bg-primary: #1a1a2e;
+            --bg-secondary: #16213e;
+            --text-primary: #e0e0e0;
+            --text-secondary: #a0a0b8;
+            --accent: #4da8ff;
+            --accent-light: #80c0ff;
+            --border: #2a2a4a;
+            --shadow: 0 2px 8px rgba(0,0,0,0.35);
+            --error-bg: #3b1010;
+            --error-text: #fca5a5;
+            --error-border: #7f1d1d;
+        }
+
+        html, body {
+            width: 100%;
+            height: 100%;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background: var(--bg-secondary);
+            color: var(--text-primary);
+            overflow: hidden;
+        }
+
+        /* Header */
+        #app-header {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: var(--header-height);
+            background: var(--bg-primary);
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 16px;
+            z-index: 1000;
+            box-shadow: var(--shadow);
+        }
+
+        #app-header .header-left {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            min-width: 0;
+        }
+
+        #app-header .header-logo {
+            width: 26px;
+            height: 26px;
+            flex-shrink: 0;
+        }
+
+        #app-header .header-title {
+            font-size: 15px;
+            font-weight: 600;
+            color: var(--text-primary);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        #app-header .header-controls {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            flex-shrink: 0;
+        }
+
+        .header-btn {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            padding: 5px 10px;
+            font-size: 13px;
+            color: var(--text-primary);
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            transition: background 0.15s, border-color 0.15s;
+            white-space: nowrap;
+        }
+
+        .header-btn:hover {
+            background: var(--border);
+        }
+
+        .header-btn.active {
+            background: var(--accent);
+            color: #fff;
+            border-color: var(--accent);
+        }
+
+        /* Map container */
+        #map-container {
+            position: fixed;
+            top: var(--header-height);
+            left: 0;
+            right: 0;
+            bottom: 0;
+        }
+
+        #map {
+            width: 100%;
+            height: 100%;
+        }
+
+        /* Attribution */
+        #attribution {
+            position: fixed;
+            bottom: 4px;
+            right: 8px;
+            background: rgba(255,255,255,0.85);
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            color: #555;
+            z-index: 999;
+            pointer-events: none;
+        }
+
+        .dark-theme #attribution {
+            background: rgba(26,26,46,0.85);
+            color: #a0a0b8;
+        }
+
+        /* Error overlay */
+        #error-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: var(--bg-secondary);
+            z-index: 2000;
+            justify-content: center;
+            align-items: center;
+        }
+
+        #error-overlay.visible {
+            display: flex;
+        }
+
+        .error-card {
+            background: var(--bg-primary);
+            border: 1px solid var(--error-border);
+            border-radius: 12px;
+            padding: 32px 40px;
+            max-width: 480px;
+            width: 90%;
+            text-align: center;
+            box-shadow: var(--shadow);
+        }
+
+        .error-card .error-icon {
+            font-size: 40px;
+            margin-bottom: 12px;
+        }
+
+        .error-card h2 {
+            font-size: 18px;
+            color: var(--error-text);
+            margin-bottom: 8px;
+        }
+
+        .error-card p {
+            font-size: 14px;
+            color: var(--text-secondary);
+            line-height: 1.5;
+        }
+
+        .error-card code {
+            display: inline-block;
+            margin-top: 12px;
+            padding: 6px 12px;
+            background: var(--bg-secondary);
+            border-radius: 6px;
+            font-size: 12px;
+            color: var(--text-secondary);
+            word-break: break-all;
+        }
+
+        /* Loading overlay */
+        #loading-overlay {
+            display: flex;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: var(--bg-secondary);
+            z-index: 1999;
+            justify-content: center;
+            align-items: center;
+            flex-direction: column;
+            gap: 16px;
+            transition: opacity 0.3s;
+        }
+
+        #loading-overlay.hidden {
+            opacity: 0;
+            pointer-events: none;
+        }
+
+        .spinner {
+            width: 36px;
+            height: 36px;
+            border: 3px solid var(--border);
+            border-top-color: var(--accent);
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .loading-text {
+            font-size: 14px;
+            color: var(--text-secondary);
+        }
+
+        /* Popup styles */
+        .marker-popup .maplibregl-popup-content,
+        .marker-popup .mapboxgl-popup-content {
+            padding: 12px 16px;
+            border-radius: 8px;
+            box-shadow: 0 4px 16px rgba(0,0,0,0.15);
+            max-width: 260px;
+        }
+
+        .popup-title {
+            font-size: 14px;
+            font-weight: 600;
+            color: #1a1a2e;
+            margin-bottom: 4px;
+        }
+
+        .popup-description {
+            font-size: 13px;
+            color: #555770;
+            line-height: 1.4;
+        }
+
+        .popup-coords {
+            font-size: 11px;
+            color: #888;
+            margin-top: 6px;
+        }
+
+        /* Custom marker */
+        .custom-marker {
+            cursor: pointer;
+            transition: transform 0.15s;
+        }
+
+        .custom-marker:hover {
+            transform: scale(1.15);
+        }
+
+        /* Responsive */
+        @media (max-width: 480px) {
+            :root {
+                --header-height: 44px;
+            }
+            #app-header {
+                padding: 0 10px;
+            }
+            #app-header .header-title {
+                font-size: 13px;
+            }
+            .header-btn {
+                padding: 4px 8px;
+                font-size: 12px;
+            }
+            .header-btn .btn-label {
+                display: none;
+            }
+        }
+    </style>
+</head>
+<body>
+    <!-- Header -->
+    <header id="app-header">
+        <div class="header-left">
+            <svg class="header-logo" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <circle cx="16" cy="16" r="15" fill="var(--accent)" stroke="var(--accent)" stroke-width="1"/>
+                <path d="M16 6C12.14 6 9 9.14 9 13c0 5.25 7 13 7 13s7-7.75 7-13c0-3.86-3.14-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z" fill="#fff"/>
+            </svg>
+            <span class="header-title" id="header-title">TomTom Interactive Map</span>
+        </div>
+        <div class="header-controls">
+            <button class="header-btn" id="btn-traffic" title="Toggle traffic layer">
+                <span>&#128678;</span>
+                <span class="btn-label">Traffic</span>
+            </button>
+            <button class="header-btn" id="btn-theme" title="Toggle dark/light theme">
+                <span id="theme-icon">&#9790;</span>
+                <span class="btn-label">Theme</span>
+            </button>
+        </div>
+    </header>
+
+    <!-- Map -->
+    <div id="map-container">
+        <div id="map"></div>
+    </div>
+
+    <!-- Attribution -->
+    <div id="attribution">Powered by TomTom</div>
+
+    <!-- Loading -->
+    <div id="loading-overlay">
+        <div class="spinner"></div>
+        <div class="loading-text">Loading map...</div>
+    </div>
+
+    <!-- Error -->
+    <div id="error-overlay">
+        <div class="error-card">
+            <div class="error-icon">&#9888;&#65039;</div>
+            <h2 id="error-title">Map Error</h2>
+            <p id="error-message"></p>
+            <code id="error-detail"></code>
+        </div>
+    </div>
+
+    <script>
+    (function() {
+        'use strict';
+
+        // ───────────────────────────────────────────
+        // Utility: parse URL parameters
+        // ───────────────────────────────────────────
+        function getParams() {
+            var params = new URLSearchParams(window.location.search);
+            return {
+                apiKey:  params.get('apiKey') || '',
+                center:  params.get('center') || '',
+                zoom:    parseFloat(params.get('zoom')) || 13,
+                markers: params.get('markers') || '',
+                route:   params.get('route') || '',
+                traffic: params.get('traffic') === 'true',
+                vizId:   params.get('vizId') || '',
+                mcpUrl:  params.get('mcpUrl') || '',
+                title:   params.get('title') || 'TomTom Interactive Map'
+            };
+        }
+
+        // ───────────────────────────────────────────
+        // Utility: decode Base64 JSON safely
+        // ───────────────────────────────────────────
+        function decodeBase64Json(str) {
+            if (!str) return null;
+            try {
+                var decoded = atob(str);
+                return JSON.parse(decoded);
+            } catch (e) {
+                // Try URL-safe base64
+                try {
+                    var safe = str.replace(/-/g, '+').replace(/_/g, '/');
+                    var decoded2 = atob(safe);
+                    return JSON.parse(decoded2);
+                } catch (e2) {
+                    console.warn('Failed to decode base64 JSON:', e2);
+                    return null;
+                }
+            }
+        }
+
+        // ───────────────────────────────────────────
+        // Utility: parse center string
+        // ───────────────────────────────────────────
+        function parseCenter(str, fallback) {
+            if (!str) return fallback;
+            var parts = str.split(',').map(function(s) { return parseFloat(s.trim()); });
+            if (parts.length >= 2 && !isNaN(parts[0]) && !isNaN(parts[1])) {
+                return { lat: parts[0], lon: parts[1] };
+            }
+            return fallback;
+        }
+
+        // ───────────────────────────────────────────
+        // Error display
+        // ───────────────────────────────────────────
+        function showError(title, message, detail) {
+            document.getElementById('loading-overlay').classList.add('hidden');
+            document.getElementById('error-title').textContent = title;
+            document.getElementById('error-message').textContent = message;
+            document.getElementById('error-detail').textContent = detail || '';
+            document.getElementById('error-detail').style.display = detail ? 'inline-block' : 'none';
+            document.getElementById('error-overlay').classList.add('visible');
+        }
+
+        function hideLoading() {
+            var el = document.getElementById('loading-overlay');
+            el.classList.add('hidden');
+            setTimeout(function() { el.style.display = 'none'; }, 350);
+        }
+
+        // ───────────────────────────────────────────
+        // State
+        // ───────────────────────────────────────────
+        var map = null;
+        var isDark = false;
+        var trafficOn = false;
+        var trafficLayer = null;
+        var params = getParams();
+
+        // Set page title
+        document.title = params.title;
+        document.getElementById('header-title').textContent = params.title;
+
+        // ───────────────────────────────────────────
+        // Theme toggle
+        // ───────────────────────────────────────────
+        var btnTheme = document.getElementById('btn-theme');
+        var themeIcon = document.getElementById('theme-icon');
+
+        btnTheme.addEventListener('click', function() {
+            isDark = !isDark;
+            document.body.classList.toggle('dark-theme', isDark);
+            themeIcon.innerHTML = isDark ? '&#9788;' : '&#9790;';
+            btnTheme.classList.toggle('active', isDark);
+
+            if (map && map.setStyle && params.apiKey) {
+                // Preserve sources and layers before style change
+                try {
+                    var styleBase = isDark
+                        ? 'https://api.tomtom.com/style/2/custom/style/dG9tdG9tQEBAVHVGWnprSEExOWhQUU5Edg.json?key=' + params.apiKey
+                        : 'https://api.tomtom.com/style/1/style/22.2.1-*?map=2/basic_street-light&traffic_incidents=2/incidents_light&traffic_flow=2/flow_light&poi=2/poi_light&key=' + params.apiKey;
+
+                    // For TomTom SDK v5, just use the map style approach
+                    if (typeof tt !== 'undefined' && map._tomtomMap) {
+                        // TomTom SDK handles themes differently
+                        return;
+                    }
+                } catch(e) {
+                    console.warn('Style switch not supported:', e);
+                }
+            }
+        });
+
+        // ───────────────────────────────────────────
+        // Traffic toggle
+        // ───────────────────────────────────────────
+        var btnTraffic = document.getElementById('btn-traffic');
+
+        btnTraffic.addEventListener('click', function() {
+            trafficOn = !trafficOn;
+            btnTraffic.classList.toggle('active', trafficOn);
+            toggleTraffic(trafficOn);
+        });
+
+        function toggleTraffic(show) {
+            if (!map) return;
+
+            // TomTom SDK v5 approach
+            if (typeof tt !== 'undefined') {
+                try {
+                    if (show) {
+                        map.showTrafficFlow();
+                        map.showTrafficIncidents();
+                    } else {
+                        map.hideTrafficFlow();
+                        map.hideTrafficIncidents();
+                    }
+                    return;
+                } catch(e) {
+                    console.warn('TomTom traffic toggle error:', e);
+                }
+            }
+
+            // MapLibre fallback - add/remove traffic source
+            try {
+                if (show && params.apiKey) {
+                    if (!map.getSource('tomtom-traffic')) {
+                        map.addSource('tomtom-traffic', {
+                            type: 'raster',
+                            tiles: [
+                                'https://api.tomtom.com/traffic/map/4/tile/flow/relative0/{z}/{x}/{y}.png?key=' + params.apiKey + '&thickness=10'
+                            ],
+                            tileSize: 256
+                        });
+                        map.addLayer({
+                            id: 'tomtom-traffic-layer',
+                            type: 'raster',
+                            source: 'tomtom-traffic',
+                            paint: { 'raster-opacity': 0.7 }
+                        });
+                    } else {
+                        map.setLayoutProperty('tomtom-traffic-layer', 'visibility', 'visible');
+                    }
+                } else {
+                    if (map.getLayer('tomtom-traffic-layer')) {
+                        map.setLayoutProperty('tomtom-traffic-layer', 'visibility', 'none');
+                    }
+                }
+            } catch(e) {
+                console.warn('Traffic layer error:', e);
+            }
+        }
+
+        // ───────────────────────────────────────────
+        // Create marker element
+        // ───────────────────────────────────────────
+        function createMarkerElement(color) {
+            var el = document.createElement('div');
+            el.className = 'custom-marker';
+            var c = color || '#e74c3c';
+            el.innerHTML =
+                '<svg width="28" height="40" viewBox="0 0 28 40" fill="none" xmlns="http://www.w3.org/2000/svg">' +
+                '<path d="M14 0C6.27 0 0 6.27 0 14c0 10.5 14 26 14 26s14-15.5 14-26C28 6.27 21.73 0 14 0z" fill="' + c + '"/>' +
+                '<circle cx="14" cy="13" r="5" fill="#fff"/>' +
+                '</svg>';
+            return el;
+        }
+
+        // ───────────────────────────────────────────
+        // Add markers to map
+        // ───────────────────────────────────────────
+        function addMarkers(markersData) {
+            if (!markersData || !Array.isArray(markersData) || markersData.length === 0) return;
+
+            markersData.forEach(function(m) {
+                var lat = parseFloat(m.lat);
+                var lon = parseFloat(m.lon || m.lng || m.longitude);
+                if (isNaN(lat) || isNaN(lon)) return;
+
+                var popupHtml =
+                    '<div>' +
+                    (m.label ? '<div class="popup-title">' + escapeHtml(m.label) + '</div>' : '') +
+                    (m.description ? '<div class="popup-description">' + escapeHtml(m.description) + '</div>' : '') +
+                    (m.address ? '<div class="popup-description" style="margin-top:4px;font-style:italic;">' + escapeHtml(m.address) + '</div>' : '') +
+                    '<div class="popup-coords">' + lat.toFixed(5) + ', ' + lon.toFixed(5) + '</div>' +
+                    '</div>';
+
+                var el = createMarkerElement(m.color);
+
+                if (typeof tt !== 'undefined') {
+                    // TomTom SDK
+                    var popup = new tt.Popup({ offset: [0, -36], className: 'marker-popup' })
+                        .setHTML(popupHtml);
+                    new tt.Marker({ element: el })
+                        .setLngLat([lon, lat])
+                        .setPopup(popup)
+                        .addTo(map);
+                } else if (typeof maplibregl !== 'undefined') {
+                    // MapLibre fallback
+                    var popup = new maplibregl.Popup({ offset: [0, -36], className: 'marker-popup' })
+                        .setHTML(popupHtml);
+                    new maplibregl.Marker({ element: el })
+                        .setLngLat([lon, lat])
+                        .setPopup(popup)
+                        .addTo(map);
+                }
+            });
+        }
+
+        // ───────────────────────────────────────────
+        // Draw route on map
+        // ───────────────────────────────────────────
+        function drawRoute(routeData) {
+            if (!routeData || !params.apiKey) return;
+
+            var origin = routeData.origin;
+            var destination = routeData.destination;
+            var waypoints = routeData.waypoints || [];
+
+            if (!origin || !destination) return;
+
+            // Build locations string for TomTom Routing API
+            var locations = origin.lat + ',' + origin.lon;
+            waypoints.forEach(function(wp) {
+                locations += ':' + wp.lat + ',' + wp.lon;
+            });
+            locations += ':' + destination.lat + ',' + destination.lon;
+
+            var url = 'https://api.tomtom.com/routing/1/calculateRoute/' +
+                      locations +
+                      '/json?key=' + params.apiKey +
+                      '&traffic=true&travelMode=car';
+
+            fetch(url)
+                .then(function(res) {
+                    if (!res.ok) throw new Error('Routing API returned ' + res.status);
+                    return res.json();
+                })
+                .then(function(data) {
+                    if (!data.routes || data.routes.length === 0) return;
+
+                    var route = data.routes[0];
+                    var coords = route.legs.reduce(function(acc, leg) {
+                        return acc.concat(leg.points.map(function(p) {
+                            return [p.longitude, p.latitude];
+                        }));
+                    }, []);
+
+                    var geojson = {
+                        type: 'Feature',
+                        geometry: {
+                            type: 'LineString',
+                            coordinates: coords
+                        },
+                        properties: {}
+                    };
+
+                    // Wait for map to be loaded
+                    function addRouteLayer() {
+                        if (map.getSource('route')) {
+                            map.getSource('route').setData(geojson);
+                            return;
+                        }
+
+                        map.addSource('route', {
+                            type: 'geojson',
+                            data: geojson
+                        });
+
+                        // Route outline
+                        map.addLayer({
+                            id: 'route-outline',
+                            type: 'line',
+                            source: 'route',
+                            layout: {
+                                'line-join': 'round',
+                                'line-cap': 'round'
+                            },
+                            paint: {
+                                'line-color': '#003d6b',
+                                'line-width': 8,
+                                'line-opacity': 0.4
+                            }
+                        });
+
+                        // Route line
+                        map.addLayer({
+                            id: 'route-line',
+                            type: 'line',
+                            source: 'route',
+                            layout: {
+                                'line-join': 'round',
+                                'line-cap': 'round'
+                            },
+                            paint: {
+                                'line-color': '#0074d9',
+                                'line-width': 4,
+                                'line-opacity': 0.85
+                            }
+                        });
+                    }
+
+                    if (map.isStyleLoaded()) {
+                        addRouteLayer();
+                    } else {
+                        map.on('load', addRouteLayer);
+                    }
+
+                    // Add origin/destination markers
+                    addMarkers([
+                        { lat: origin.lat, lon: origin.lon, label: routeData.originLabel || 'Start', color: '#27ae60' },
+                        { lat: destination.lat, lon: destination.lon, label: routeData.destinationLabel || 'End', color: '#e74c3c' }
+                    ]);
+
+                    // Add waypoint markers
+                    if (waypoints.length > 0) {
+                        addMarkers(waypoints.map(function(wp, i) {
+                            return {
+                                lat: wp.lat,
+                                lon: wp.lon,
+                                label: wp.label || ('Waypoint ' + (i + 1)),
+                                color: '#f39c12'
+                            };
+                        }));
+                    }
+
+                    // Fit bounds to route
+                    var bounds = coords.reduce(function(b, coord) {
+                        return b.extend(coord);
+                    }, new (typeof tt !== 'undefined' ? tt.LngLatBounds : maplibregl.LngLatBounds)(coords[0], coords[0]));
+
+                    map.fitBounds(bounds, { padding: 60 });
+
+                    // Show summary
+                    if (route.summary) {
+                        var distKm = (route.summary.lengthInMeters / 1000).toFixed(1);
+                        var timeMins = Math.round(route.summary.travelTimeInSeconds / 60);
+                        console.log('Route: ' + distKm + ' km, ~' + timeMins + ' min');
+                    }
+                })
+                .catch(function(err) {
+                    console.error('Route calculation error:', err);
+                });
+        }
+
+        // ───────────────────────────────────────────
+        // Fetch viz data from MCP server
+        // ───────────────────────────────────────────
+        function fetchVizData(vizId, mcpUrl) {
+            if (!vizId || !mcpUrl) return Promise.resolve(null);
+
+            var url = mcpUrl.replace(/\/$/, '') + '/api/viz/' + encodeURIComponent(vizId);
+
+            return fetch(url)
+                .then(function(res) {
+                    if (!res.ok) throw new Error('Viz fetch returned ' + res.status);
+                    return res.json();
+                })
+                .then(function(vizData) {
+                    return vizData;
+                })
+                .catch(function(err) {
+                    console.warn('Failed to fetch viz data:', err);
+                    return null;
+                });
+        }
+
+        // ───────────────────────────────────────────
+        // Apply viz data to map
+        // ───────────────────────────────────────────
+        function applyVizData(vizData) {
+            if (!vizData) return;
+
+            // Apply center
+            if (vizData.center) {
+                var c = vizData.center;
+                map.setCenter([c.lon || c.lng || c.longitude, c.lat || c.latitude]);
+            }
+
+            // Apply zoom
+            if (vizData.zoom) {
+                map.setZoom(vizData.zoom);
+            }
+
+            // Apply markers
+            if (vizData.markers && Array.isArray(vizData.markers)) {
+                addMarkers(vizData.markers);
+            }
+
+            // Apply route
+            if (vizData.route) {
+                drawRoute(vizData.route);
+            }
+
+            // Apply traffic
+            if (vizData.traffic) {
+                trafficOn = true;
+                btnTraffic.classList.add('active');
+                toggleTraffic(true);
+            }
+
+            // Apply title
+            if (vizData.title) {
+                document.getElementById('header-title').textContent = vizData.title;
+                document.title = vizData.title;
+            }
+
+            // Apply GeoJSON layers
+            if (vizData.geojsonLayers && Array.isArray(vizData.geojsonLayers)) {
+                vizData.geojsonLayers.forEach(function(layer, i) {
+                    var srcId = 'viz-source-' + i;
+                    var layerId = 'viz-layer-' + i;
+
+                    if (map.getSource(srcId)) return;
+
+                    map.addSource(srcId, {
+                        type: 'geojson',
+                        data: layer.data
+                    });
+
+                    var layerDef = {
+                        id: layerId,
+                        source: srcId,
+                        type: layer.type || 'circle'
+                    };
+
+                    if (layer.paint) layerDef.paint = layer.paint;
+                    if (layer.layout) layerDef.layout = layer.layout;
+
+                    map.addLayer(layerDef);
+                });
+            }
+        }
+
+        // ───────────────────────────────────────────
+        // Escape HTML
+        // ───────────────────────────────────────────
+        function escapeHtml(str) {
+            if (!str) return '';
+            var div = document.createElement('div');
+            div.appendChild(document.createTextNode(str));
+            return div.innerHTML;
+        }
+
+        // ───────────────────────────────────────────
+        // Fit map to markers
+        // ───────────────────────────────────────────
+        function fitToMarkers(markersData) {
+            if (!markersData || markersData.length < 2) return;
+
+            var BoundsClass = typeof tt !== 'undefined' ? tt.LngLatBounds : maplibregl.LngLatBounds;
+            var bounds = new BoundsClass();
+
+            markersData.forEach(function(m) {
+                var lat = parseFloat(m.lat);
+                var lon = parseFloat(m.lon || m.lng || m.longitude);
+                if (!isNaN(lat) && !isNaN(lon)) {
+                    bounds.extend([lon, lat]);
+                }
+            });
+
+            if (!bounds.isEmpty()) {
+                map.fitBounds(bounds, { padding: 60, maxZoom: 16 });
+            }
+        }
+
+        // ───────────────────────────────────────────
+        // Initialize map
+        // ───────────────────────────────────────────
+        function init() {
+            // Validate API key
+            if (!params.apiKey) {
+                showError(
+                    'API Key Required',
+                    'A TomTom API key is needed to load the map. Please include the apiKey parameter in the URL.',
+                    'Example: ?apiKey=YOUR_KEY&center=51.5074,-0.1278&zoom=13'
+                );
+                return;
+            }
+
+            var defaultCenter = { lat: 51.5074, lon: -0.1278 }; // London
+            var center = parseCenter(params.center, defaultCenter);
+            var markersData = decodeBase64Json(params.markers);
+            var routeData = decodeBase64Json(params.route);
+
+            // Try TomTom SDK first
+            if (typeof tt !== 'undefined' && tt.map) {
+                try {
+                    map = tt.map({
+                        key: params.apiKey,
+                        container: 'map',
+                        center: [center.lon, center.lat],
+                        zoom: params.zoom,
+                        language: 'en-US'
+                    });
+
+                    map.addControl(new tt.NavigationControl(), 'top-right');
+                    map.addControl(new tt.FullscreenControl(), 'top-right');
+
+                    map.on('load', function() {
+                        hideLoading();
+
+                        // Add markers
+                        if (markersData) {
+                            addMarkers(markersData);
+                            fitToMarkers(markersData);
+                        }
+
+                        // Draw route
+                        if (routeData) {
+                            drawRoute(routeData);
+                        }
+
+                        // Traffic
+                        if (params.traffic) {
+                            trafficOn = true;
+                            btnTraffic.classList.add('active');
+                            toggleTraffic(true);
+                        }
+
+                        // Fetch viz data
+                        if (params.vizId && params.mcpUrl) {
+                            fetchVizData(params.vizId, params.mcpUrl).then(function(vizData) {
+                                if (vizData) applyVizData(vizData);
+                            });
+                        }
+                    });
+
+                    map.on('error', function(e) {
+                        console.error('Map error:', e);
+                    });
+
+                    return;
+                } catch(e) {
+                    console.warn('TomTom SDK init failed, trying MapLibre:', e);
+                }
+            }
+
+            // Fallback: MapLibre GL JS with TomTom tile server
+            if (typeof maplibregl !== 'undefined') {
+                try {
+                    var styleUrl = 'https://api.tomtom.com/style/1/style/22.2.1-*?map=2/basic_street-light&traffic_incidents=2/incidents_light&traffic_flow=2/flow_light&poi=2/poi_light&key=' + params.apiKey;
+
+                    map = new maplibregl.Map({
+                        container: 'map',
+                        style: {
+                            version: 8,
+                            sources: {
+                                'tomtom-raster': {
+                                    type: 'raster',
+                                    tiles: [
+                                        'https://api.tomtom.com/map/1/tile/basic/main/{z}/{x}/{y}.png?key=' + params.apiKey + '&tileSize=256'
+                                    ],
+                                    tileSize: 256,
+                                    attribution: '&copy; TomTom'
+                                }
+                            },
+                            layers: [
+                                {
+                                    id: 'tomtom-base',
+                                    type: 'raster',
+                                    source: 'tomtom-raster',
+                                    minzoom: 0,
+                                    maxzoom: 22
+                                }
+                            ]
+                        },
+                        center: [center.lon, center.lat],
+                        zoom: params.zoom
+                    });
+
+                    map.addControl(new maplibregl.NavigationControl(), 'top-right');
+                    map.addControl(new maplibregl.FullscreenControl(), 'top-right');
+
+                    map.on('load', function() {
+                        hideLoading();
+
+                        // Add markers
+                        if (markersData) {
+                            addMarkers(markersData);
+                            fitToMarkers(markersData);
+                        }
+
+                        // Draw route
+                        if (routeData) {
+                            drawRoute(routeData);
+                        }
+
+                        // Traffic
+                        if (params.traffic) {
+                            trafficOn = true;
+                            btnTraffic.classList.add('active');
+                            toggleTraffic(true);
+                        }
+
+                        // Fetch viz data
+                        if (params.vizId && params.mcpUrl) {
+                            fetchVizData(params.vizId, params.mcpUrl).then(function(vizData) {
+                                if (vizData) applyVizData(vizData);
+                            });
+                        }
+                    });
+
+                    map.on('error', function(e) {
+                        console.error('MapLibre error:', e);
+                    });
+
+                    return;
+                } catch(e) {
+                    console.warn('MapLibre init failed:', e);
+                }
+            }
+
+            // Both failed
+            showError(
+                'Map SDK Unavailable',
+                'Could not initialize the map. Please check your internet connection and try refreshing the page.',
+                'Neither TomTom SDK nor MapLibre GL could be loaded.'
+            );
+        }
+
+        // ───────────────────────────────────────────
+        // Boot
+        // ───────────────────────────────────────────
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', init);
+        } else {
+            init();
+        }
+    })();
+    </script>
+</body>
+</html>

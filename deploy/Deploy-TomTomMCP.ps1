@@ -19,6 +19,9 @@
 
 .PARAMETER ResourceGroupName
     Resource group name. Default: rg-tomtom-mcp
+
+.PARAMETER MapsBackend
+    Maps backend to use. Default: tomtom-orbis-maps
 #>
 
 [CmdletBinding()]
@@ -34,7 +37,8 @@ param(
     [string]$Location = "uksouth",
     [string]$ResourceGroupName = "rg-tomtom-mcp",
     [string]$EnvironmentName = "cae-tomtom-mcp",
-    [string]$AppName = "ca-tomtom-mcp"
+    [string]$AppName = "ca-tomtom-mcp",
+    [string]$MapsBackend = "tomtom-orbis-maps"
 )
 
 $ErrorActionPreference = "Stop"
@@ -77,7 +81,7 @@ $appExists = az containerapp show --name $AppName --resource-group $ResourceGrou
 if ($appExists) {
     Write-Host "  Updating existing app..." -ForegroundColor DarkGray
     az containerapp update --name $AppName --resource-group $ResourceGroupName `
-        --set-env-vars "TOMTOM_API_KEY=$TomTomApiKey" "PORT=3000" "MAPS=tomtom-maps" `
+        --set-env-vars "TOMTOM_API_KEY=$TomTomApiKey" "PORT=3000" "MAPS=$MapsBackend" `
         "ENABLE_DYNAMIC_MAPS=true" "NODE_ENV=production" "LOG_LEVEL=info" -o none
 }
 else {
@@ -86,8 +90,8 @@ else {
         --image ghcr.io/tomtom-international/tomtom-mcp:latest `
         --target-port 3000 --ingress external `
         --min-replicas 1 --max-replicas 3 `
-        --cpu 1.0 --memory 2.0Gi `
-        --env-vars "TOMTOM_API_KEY=$TomTomApiKey" "PORT=3000" "MAPS=tomtom-maps" `
+        --cpu 1.5 --memory 3.0Gi `
+        --env-vars "TOMTOM_API_KEY=$TomTomApiKey" "PORT=3000" "MAPS=$MapsBackend" `
         "ENABLE_DYNAMIC_MAPS=true" "NODE_ENV=production" "LOG_LEVEL=info" -o none
 }
 
@@ -117,4 +121,5 @@ Write-Host "=== Deployment Complete ===" -ForegroundColor Cyan
 Write-Host "  URL: https://$fqdn" -ForegroundColor White
 Write-Host "  MCP: https://$fqdn/mcp" -ForegroundColor White
 Write-Host "  Health: https://$fqdn/health" -ForegroundColor White
+Write-Host "  Backend: $MapsBackend" -ForegroundColor White
 Write-Host ""

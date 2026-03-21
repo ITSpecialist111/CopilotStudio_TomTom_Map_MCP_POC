@@ -1,0 +1,23 @@
+{
+  "name": "tomtom-interactive-map-app",
+  "version": "1.0.0",
+  "description": "Lightweight interactive map web application powered by TomTom Maps SDK, deployed as an Azure Static Web App. Renders maps with markers, routes, and traffic overlays via URL query parameters.",
+  "private": true,
+  "keywords": [
+    "tomtom",
+    "maps",
+    "interactive-map",
+    "azure-static-web-app",
+    "maplibre"
+  ],
+  "author": "TomTom MCP Integration",
+  "license": "MIT",
+  "homepage": "https://github.com/your-org/tomtom-interactive-map-app",
+  "scripts": {
+    "start": "npx serve . -l 3000",
+    "dev": "npx serve . -l 3000 --cors"
+  },
+  "engines": {
+    "node": ">=14.0.0"
+  }
+}

@@ -22,4 +22,7 @@ public class LocationItem
     public string Source { get; set; } = "";
     public DateTime LastUpdated { get; set; } = DateTime.UtcNow;
     public string NearestOffice { get; set; } = ""; // Which office this POI is near
+    public string EvConnectorTypes { get; set; } = ""; // Comma-separated EV connector types
+    public string EvPowerKw { get; set; } = ""; // EV charging power in kW
+    public string EvAvailability { get; set; } = ""; // Real-time EV availability status
 }

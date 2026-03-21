@@ -100,7 +100,37 @@ public class Program
                 await Task.Delay(500);
             }
 
-            // Step 4: Push all items to Microsoft Graph
+            // Step 4: If enabled, search for EV charging stations near each office
+            if (config.IncludeEvCharging)
+            {
+                Log.Information("--- Indexing EV charging stations ---");
+                foreach (var office in config.Offices)
+                {
+                    // Find the office location from previously geocoded items
+                    var officeItem = allItems.FirstOrDefault(i => i.Name == office.Name && i.Type == "Office");
+                    if (officeItem == null)
+                    {
+                        Log.Warning("  Skipping EV search for {Office} - office location not found", office.Name);
+                        continue;
+                    }
+
+                    Log.Information("  Searching EV charging stations near {Office}...", office.Name);
+                    var evStations = await tomtom.SearchEvChargingAsync(
+                        officeItem.Latitude,
+                        officeItem.Longitude,
+                        config.EvSearchRadius);
+
+                    foreach (var ev in evStations)
+                    {
+                        ev.NearestOffice = office.Name;
+                        allItems.Add(ev);
+                    }
+
+                    await Task.Delay(500); // Rate limit courtesy
+                }
+            }
+
+            // Step 5: Push all items to Microsoft Graph
             Log.Information("--- Pushing {Count} items to Microsoft Search ---", allItems.Count);
             int success = 0, errors = 0;
 

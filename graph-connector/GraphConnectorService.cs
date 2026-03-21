@@ -103,6 +103,9 @@ public class GraphConnectorService
                 new() { Name = "source", Type = PropertyType.String, IsRetrievable = true },
                 new() { Name = "nearestOffice", Type = PropertyType.String, IsSearchable = true, IsRetrievable = true, IsQueryable = true },
                 new() { Name = "lastUpdated", Type = PropertyType.DateTime, IsRetrievable = true, IsQueryable = true },
+                new() { Name = "evConnectorTypes", Type = PropertyType.String, IsSearchable = true, IsRetrievable = true, IsQueryable = true },
+                new() { Name = "evPowerKw", Type = PropertyType.String, IsRetrievable = true, IsQueryable = true },
+                new() { Name = "evAvailability", Type = PropertyType.String, IsSearchable = true, IsRetrievable = true, IsQueryable = true },
             }
         };
 
@@ -162,6 +165,9 @@ public class GraphConnectorService
         if (!string.IsNullOrEmpty(item.Url)) properties["url"] = item.Url;
         if (!string.IsNullOrEmpty(item.Source)) properties["source"] = item.Source;
         if (!string.IsNullOrEmpty(item.NearestOffice)) properties["nearestOffice"] = item.NearestOffice;
+        if (!string.IsNullOrEmpty(item.EvConnectorTypes)) properties["evConnectorTypes"] = item.EvConnectorTypes;
+        if (!string.IsNullOrEmpty(item.EvPowerKw)) properties["evPowerKw"] = item.EvPowerKw;
+        if (!string.IsNullOrEmpty(item.EvAvailability)) properties["evAvailability"] = item.EvAvailability;
         properties["lastUpdated"] = item.LastUpdated;
 
         var externalItem = new ExternalItem
@@ -175,6 +181,7 @@ public class GraphConnectorService
             {
                 Type = ExternalItemContentType.Text,
                 Value = $"{item.Name} - {item.Address}. Type: {item.Type}. Category: {item.Category}. Near: {item.NearestOffice}."
+                    + (string.IsNullOrEmpty(item.EvConnectorTypes) ? "" : $" EV Connectors: {item.EvConnectorTypes}. Power: {item.EvPowerKw} kW. Availability: {item.EvAvailability}.")
             },
             Acl = new List<Acl>
             {

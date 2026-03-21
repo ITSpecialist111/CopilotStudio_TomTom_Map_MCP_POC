@@ -1,9 +1,14 @@
 # Build outputs
 graph-connector/bin/
 graph-connector/obj/
+map-proxy-api/dist/
+map-proxy-api/node_modules/
+interactive-map-app/node_modules/
 
 # Secrets — never commit real credentials
 graph-connector/appsettings.json
+map-proxy-api/local.settings.json
+*.env
 
 # Deployment artifacts with real IDs (generated at runtime)
 body1.json
@@ -18,3 +23,8 @@ body2.json
 # OS
 .DS_Store
 Thumbs.db
+
+# Azure Functions
+.azure/
+bin/
+obj/
