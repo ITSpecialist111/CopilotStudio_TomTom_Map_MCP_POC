@@ -403,21 +403,29 @@
         function initTeams() {
             if (typeof microsoftTeams === 'undefined') return Promise.resolve(false);
             try {
-                return microsoftTeams.app.initialize().then(function() {
+                // Race the SDK init against a timeout - Teams shows
+                // "refused to connect" if notifyAppLoaded isn't called quickly
+                var timeout = new Promise(function(resolve) {
+                    setTimeout(function() { resolve(false); }, 3000);
+                });
+
+                var sdkInit = microsoftTeams.app.initialize().then(function() {
                     isInTeams = true;
+                    // Immediately tell Teams we're loaded
+                    try { microsoftTeams.app.notifyAppLoaded(); } catch(e) {}
                     return microsoftTeams.app.getContext();
                 }).then(function(context) {
                     teamsContext = context;
-                    // In Teams, use compact header
                     document.body.classList.add('teams-embedded');
-                    // Notify Teams that app is loaded
                     microsoftTeams.app.notifySuccess();
                     console.log('Teams SDK initialized. Frame context:', context.page && context.page.frameContext);
                     return true;
                 }).catch(function(err) {
-                    console.log('Not running inside Teams:', err.message || err);
+                    console.log('Teams SDK init error:', err.message || err);
                     return false;
                 });
+
+                return Promise.race([sdkInit, timeout]);
             } catch(e) {
                 return Promise.resolve(false);
             }
