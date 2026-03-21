@@ -6,6 +6,9 @@
     <meta http-equiv="X-UA-Compatible" content="ie=edge">
     <title>TomTom Interactive Map</title>
 
+    <!-- Microsoft Teams SDK (for Stage View / Task Module embedding) -->
+    <script src="https://res.cdn.office.net/teams-js/2.31.1/js/MicrosoftTeams.min.js" crossorigin="anonymous"></script>
+
     <!-- TomTom Maps SDK -->
     <link rel="stylesheet" href="https://api.tomtom.com/maps-sdk-for-web/cdn/5.x/5.73.0/maps/maps.css">
     <script src="https://api.tomtom.com/maps-sdk-for-web/cdn/5.x/5.73.0/maps/maps-web.min.js"></script>
@@ -317,6 +320,28 @@
                 display: none;
             }
         }
+
+        /* Teams embedded mode - compact header */
+        .teams-embedded {
+            --header-height: 36px;
+        }
+
+        .teams-embedded #app-header {
+            padding: 0 8px;
+        }
+
+        .teams-embedded #app-header .header-title {
+            font-size: 13px;
+        }
+
+        .teams-embedded .header-btn {
+            padding: 3px 6px;
+            font-size: 11px;
+        }
+
+        .teams-embedded .header-btn .btn-label {
+            display: none;
+        }
     </style>
 </head>
 <body>
@@ -368,6 +393,35 @@
     <script>
     (function() {
         'use strict';
+
+        // ───────────────────────────────────────────
+        // Microsoft Teams SDK initialization
+        // ───────────────────────────────────────────
+        var isInTeams = false;
+        var teamsContext = null;
+
+        function initTeams() {
+            if (typeof microsoftTeams === 'undefined') return Promise.resolve(false);
+            try {
+                return microsoftTeams.app.initialize().then(function() {
+                    isInTeams = true;
+                    return microsoftTeams.app.getContext();
+                }).then(function(context) {
+                    teamsContext = context;
+                    // In Teams, use compact header
+                    document.body.classList.add('teams-embedded');
+                    // Notify Teams that app is loaded
+                    microsoftTeams.app.notifySuccess();
+                    console.log('Teams SDK initialized. Frame context:', context.page && context.page.frameContext);
+                    return true;
+                }).catch(function(err) {
+                    console.log('Not running inside Teams:', err.message || err);
+                    return false;
+                });
+            } catch(e) {
+                return Promise.resolve(false);
+            }
+        }
 
         // ───────────────────────────────────────────
         // Utility: parse URL parameters
@@ -1012,10 +1066,16 @@
         // ───────────────────────────────────────────
         // Boot
         // ───────────────────────────────────────────
+        function boot() {
+            initTeams().then(function() {
+                init();
+            });
+        }
+
         if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', init);
+            document.addEventListener('DOMContentLoaded', boot);
         } else {
-            init();
+            boot();
         }
     })();
     </script>

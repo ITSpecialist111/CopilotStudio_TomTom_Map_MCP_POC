@@ -1,0 +1,50 @@
+{
+  "$schema": "https://developer.microsoft.com/en-us/json-schemas/teams/v1.17/MicrosoftTeams.schema.json",
+  "manifestVersion": "1.17",
+  "version": "2.0.0",
+  "id": "{{TEAMS_APP_ID}}",
+  "developer": {
+    "name": "TomTom MCP POC",
+    "websiteUrl": "https://github.com/ITSpecialist111/CopilotStudio_TomTom_Map_MCP_POC",
+    "privacyUrl": "https://github.com/ITSpecialist111/CopilotStudio_TomTom_Map_MCP_POC",
+    "termsOfUseUrl": "https://github.com/ITSpecialist111/CopilotStudio_TomTom_Map_MCP_POC"
+  },
+  "name": {
+    "short": "TomTom Maps",
+    "full": "TomTom Interactive Maps for Copilot Studio"
+  },
+  "description": {
+    "short": "Interactive TomTom maps inside Microsoft Teams",
+    "full": "Renders interactive TomTom Orbis Maps inside Microsoft Teams via Stage View and Task Modules. Supports search results, routing, traffic, EV chargers, and data visualization with pan, zoom, and clickable markers."
+  },
+  "icons": {
+    "color": "color.png",
+    "outline": "outline.png"
+  },
+  "accentColor": "#003D6B",
+  "staticTabs": [
+    {
+      "entityId": "tomtom-map-tab",
+      "name": "TomTom Map",
+      "contentUrl": "https://thankful-sky-03359db03.2.azurestaticapps.net/?apiKey={{TOMTOM_API_KEY}}&center=51.5074,-0.1278&zoom=10",
+      "websiteUrl": "https://thankful-sky-03359db03.2.azurestaticapps.net/",
+      "scopes": ["personal", "team", "groupChat"]
+    }
+  ],
+  "validDomains": [
+    "thankful-sky-03359db03.2.azurestaticapps.net",
+    "api.tomtom.com",
+    "ca-tomtom-mcp.ashydesert-9fc5fdf3.uksouth.azurecontainerapps.io",
+    "ca-tomtom-map-proxy.ashydesert-9fc5fdf3.uksouth.azurecontainerapps.io"
+  ],
+  "permissions": [
+    "identity",
+    "messageTeamMembers"
+  ],
+  "devicePermissions": [],
+  "defaultInstallScope": "personal",
+  "defaultGroupCapability": {
+    "team": "tab",
+    "groupChat": "tab"
+  }
+}
