@@ -1,0 +1,43 @@
+{
+  "swagger": "2.0",
+  "info": {
+    "title": "TomTom",
+    "description": "TomTom geospatial services via MCP (Model Context Protocol) powered by Orbis Maps. Provides geocoding, routing, EV routing, traffic, search, area search, search along route, EV charging search, interactive map generation, and data visualization capabilities. 16 tools deployed on Azure Container Apps.",
+    "version": "2.0.0",
+    "contact": {
+      "name": "TomTom MCP POC",
+      "url": "https://github.com/ITSpecialist111/CopilotStudio_TomTom_Map_MCP_POC"
+    }
+  },
+  "host": "ca-tomtom-mcp.ashydesert-9fc5fdf3.uksouth.azurecontainerapps.io",
+  "basePath": "/",
+  "schemes": ["https"],
+  "paths": {
+    "/mcp": {
+      "post": {
+        "responses": {
+          "200": {
+            "description": "Immediate Response"
+          }
+        },
+        "x-ms-agentic-protocol": "mcp-streamable-1.0",
+        "operationId": "InvokeServer",
+        "summary": "TomTom",
+        "description": "TomTom geospatial services via MCP (Model Context Protocol) powered by Orbis Maps. Supports 16 tools: geocode, reverse geocode, fuzzy search, POI search, nearby search, routing, waypoint routing, reachable range, traffic, dynamic map, static map, EV routing, search along route, area search, EV charging search, and data visualization."
+      }
+    }
+  },
+  "securityDefinitions": {
+    "api_key": {
+      "type": "apiKey",
+      "in": "header",
+      "name": "tomtom-api-key",
+      "description": "TomTom API Key for authentication"
+    }
+  },
+  "security": [
+    {
+      "api_key": []
+    }
+  ]
+}
