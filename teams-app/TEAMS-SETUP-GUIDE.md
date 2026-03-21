@@ -356,7 +356,59 @@ The Adaptive Card uses these Teams-supported elements:
 
 ## Roadmap
 
-### Live Share SDK
+### Phase 1: PCF Code Component (Power Apps interactive map)
+
+Build a Power Apps Component Framework (PCF) control that renders a full interactive TomTom map using MapLibre GL JS. Unlike Adaptive Cards (which are static JSON with no JavaScript), PCF controls execute TypeScript/JavaScript with full HTML/CSS rendering inside the Power Platform runtime.
+
+**Why**: PCF is the only place in the Microsoft Power Platform stack where custom interactive web content (maps, charts, 3D) can run natively. This replaces the current workaround of linking out to an external Static Web App via Stage View.
+
+**Architecture**:
+```
+Copilot Studio Agent → MCP Server (geocode/search)
+        |
+        v
+Adaptive Card with "Open Map App" button
+        |
+        v
+Power App (Canvas or Model-driven) with PCF Map Component
+  - MapLibre GL JS + TomTom vector tiles
+  - Full interactivity (pan, zoom, markers, routes)
+  - Runs inside Teams as an embedded Power App tab
+  - Reads/writes to Dataverse (save locations, routes, history)
+```
+
+**Features**:
+- Interactive TomTom map with vector tiles, POIs, traffic overlays
+- Input properties: `latitude`, `longitude`, `zoom`, `apiKey`, `markers` (JSON)
+- Output properties: selected coordinates, bounds (for Dataverse write-back)
+- Drag-and-drop into any canvas app or model-driven form
+- Native Power Platform governance (DLP, environments, admin controls)
+
+**Advantages over current SWA approach**:
+
+| Feature | SWA + Stage View | PCF in Power App |
+|---------|-----------------|------------------|
+| Interactive map in Teams | Via Stage View modal | Via embedded Power App tab |
+| Data persistence | URL parameters only | Dataverse (save/share maps) |
+| User auth | None | Power Platform auth (AAD) |
+| Collaboration | Requires Live Share | Native Power Apps sharing |
+| Admin control | SWA deployment | Power Platform governance |
+| Offline | No | Power Apps offline mode |
+| Reusable | Single web app | Any canvas/model-driven app |
+
+**Implementation steps**:
+1. Scaffold PCF project with `pac pcf init --namespace TomTom --name MapControl --template field`
+2. Add MapLibre GL JS and TomTom vector tile style
+3. Define input/output properties in `ControlManifest.Input.xml`
+4. Build map rendering in `index.ts` with marker/route support
+5. Package and deploy to Power Platform environment
+6. Embed in a canvas app, publish as Teams tab
+
+See: https://learn.microsoft.com/en-us/power-apps/developer/component-framework/overview
+
+---
+
+### Phase 2: Live Share SDK (collaborative maps in meetings)
 
 Integrate `@microsoft/live-share` into the interactive map for collaborative multi-user map viewing in Teams meetings and chats:
 - **Shared pan/zoom** (`LiveState`) — presenter controls everyone's map view
@@ -366,12 +418,44 @@ Integrate `@microsoft/live-share` into the interactive map for collaborative mul
 
 Requires Teams manifest update for meeting contexts (`meetingStage`, `sidePanel`).
 
+Can be implemented in either the SWA or the PCF component.
+
 See: https://learn.microsoft.com/en-us/microsoftteams/platform/apps-in-teams-meetings/teams-live-share-overview
 
-### TomTom Assets API
+---
+
+### Phase 3: TomTom Assets API (custom map styling)
 
 Use the TomTom Assets API for:
-- **Style switching** — dark mode, satellite view
-- **Custom sprites** — custom marker icons for different POI types
+- **Style switching** — dark mode, satellite view, custom themes
+- **Custom sprites** — custom marker icons for different POI types (EV chargers, restaurants, etc.)
+- **Font customization** — custom map label rendering
+
+Applies to both the SWA and PCF map implementations.
 
 See: https://developer.tomtom.com/assets-api/api-explorer
+
+---
+
+### Interactive Maps Across Platforms — Reference
+
+Current state of interactive map support across Microsoft and AI platforms:
+
+| Platform | Interactive Map? | Method |
+|----------|-----------------|--------|
+| **Claude Desktop** | Yes | MCP Apps protocol — renders HTML/JS in webview |
+| **VS Code + Claude** | Yes | MCP Apps protocol — renders in panel |
+| **Power Apps (PCF)** | Yes | PCF code components execute TypeScript/JS |
+| **Power BI** | Yes | Azure Maps visual, ArcGIS, built-in map visuals |
+| **Teams Tab** | Yes | Embed any web app (SWA, Power App) as iframe |
+| **Teams Stage View** | Yes | Open web content in modal panel (current approach) |
+| **Teams Collaborative StageView** | Yes | Stage View with side chat — ideal for sharing |
+| **Teams Meeting Stage** | Yes | Share web app to meeting (combine with Live Share) |
+| **SharePoint** | Yes | Embed web part or Power BI report |
+| **Adaptive Cards** | **No** | Static images only — no iframes, HTML, or JavaScript |
+| **Copilot Studio (inline)** | **No** | Returns Adaptive Cards only |
+| **Microsoft 365 Copilot** | **No** | Adaptive Cards only |
+| **GitHub Copilot CLI** | **No** | Text terminal — no rendering |
+| **Outlook** | **No** | Adaptive Cards (more limited than Teams) |
+
+**Key insight**: There is no way to render an interactive map *inline in a Teams chat message*. Every option requires a tab, dialog, stage view, or separate app surface. The Adaptive Card with static map preview + button to open interactive view is the standard pattern used across the Microsoft ecosystem.
