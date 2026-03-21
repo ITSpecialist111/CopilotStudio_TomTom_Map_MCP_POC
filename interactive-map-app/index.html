@@ -991,34 +991,15 @@
             // Fallback: MapLibre GL JS with TomTom tile server
             if (typeof maplibregl !== 'undefined') {
                 try {
-                    var styleUrl = 'https://api.tomtom.com/style/1/style/22.2.1-*?map=2/basic_street-light&traffic_incidents=2/incidents_light&traffic_flow=2/flow_light&poi=2/poi_light&key=' + params.apiKey;
+                    // Use TomTom vector style for full POI/traffic support
+                    var vectorStyleUrl = 'https://api.tomtom.com/style/1/style/22.2.1-*?map=2/basic_street-light&traffic_incidents=2/incidents_light&traffic_flow=2/flow_light&poi=2/poi_light&key=' + params.apiKey;
 
                     map = new maplibregl.Map({
                         container: 'map',
-                        style: {
-                            version: 8,
-                            sources: {
-                                'tomtom-raster': {
-                                    type: 'raster',
-                                    tiles: [
-                                        'https://api.tomtom.com/map/1/tile/basic/main/{z}/{x}/{y}.png?key=' + params.apiKey + '&tileSize=256'
-                                    ],
-                                    tileSize: 256,
-                                    attribution: '&copy; TomTom'
-                                }
-                            },
-                            layers: [
-                                {
-                                    id: 'tomtom-base',
-                                    type: 'raster',
-                                    source: 'tomtom-raster',
-                                    minzoom: 0,
-                                    maxzoom: 22
-                                }
-                            ]
-                        },
+                        style: vectorStyleUrl,
                         center: [center.lon, center.lat],
-                        zoom: params.zoom
+                        zoom: params.zoom,
+                        attributionControl: true
                     });
 
                     map.addControl(new maplibregl.NavigationControl(), 'top-right');
