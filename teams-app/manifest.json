@@ -26,7 +26,7 @@
     {
       "entityId": "tomtom-map-tab",
       "name": "TomTom Map",
-      "contentUrl": "https://thankful-sky-03359db03.2.azurestaticapps.net/?apiKey=KTdUeJdXaeQS4ymsVFYlm7SnpJDF4yBA&center=51.5074,-0.1278&zoom=10&v=2",
+      "contentUrl": "https://thankful-sky-03359db03.2.azurestaticapps.net/?apiKey=YOUR_TOMTOM_MAPS_KEY&center=51.5074,-0.1278&zoom=10&v=2",
       "websiteUrl": "https://thankful-sky-03359db03.2.azurestaticapps.net/",
       "scopes": ["personal"]
     }

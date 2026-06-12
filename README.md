@@ -14,6 +14,23 @@
 | **Orbis test suite** | Dedicated 18-test suite covering all 16 Orbis tools plus security and performance checks |
 | **EV charging Graph indexing** | Graph Connector can now index EV charging station data into Microsoft Search |
 
+## What's New in v3.0 — Microsoft Copilot Cowork plugin
+
+| Feature | Details |
+|---------|---------|
+| **Copilot Cowork custom plugin** | New `cowork-plugin/` package (M365 manifest v1.28) with 6 correlated Agent Skills + an MCP connector, deployable via **M365 Admin Center → Copilot → Agents → All agents → Add agent**. |
+| **MCP gateway** | New `POST /api/mcp` route on the map-proxy (`map-proxy-api/src/lib/mcpGateway.ts`) bridges Cowork to the official TomTom MCP, injecting the `tomtom-api-key` server-side (Cowork connector auth = `None`). |
+| **`render_live_map` tool** | Synthetic gateway tool returning an inline map image **and** a live interactive map link (pan/zoom/traffic) so maps render directly in Cowork. |
+| **Correlated skills** | Location search, route planning, live traffic, EV journey, live map, and (optional) MOVE traffic analytics — each hands off to `tomtom-live-map`. |
+| **Key-leak hardening** | The gateway filters the upstream `tomtom-get-api-key` tool out of discovery and blocks calls to it. |
+| **Live maps render in Cowork (MCP Apps / SEP-1865)** | The gateway serves its own self-contained **MCP App widget** and bakes a server-rendered map image into it (correlated via `Mcp-Session-Id`), so dynamic, live TomTom maps render inside Cowork. See **[docs/COWORK-MCP-APPS-ADAPTATION.md](docs/COWORK-MCP-APPS-ADAPTATION.md)**. |
+
+> See **[cowork-plugin/README.md](cowork-plugin/README.md)**, the
+> **[deployment guide](cowork-plugin/COWORK-DEPLOYMENT-GUIDE.md)**, the design
+> **[plan](docs/COWORK-PLUGIN-PLAN.md)**, and the **[implementation log](docs/COWORK-IMPLEMENTATION-LOG.md)**.
+>
+> **How the MCP server was adapted for Cowork (live maps):** [docs/COWORK-MCP-APPS-ADAPTATION.md](docs/COWORK-MCP-APPS-ADAPTATION.md).
+
 ## Architecture
 
 ```
@@ -216,18 +233,54 @@ See [graph-connector/DEPLOYMENT-GUIDE.md](graph-connector/DEPLOYMENT-GUIDE.md) f
 
 The Orbis suite runs 18 tests: health check, tools/list verification, all 16 tool invocations (geocode, reverse geocode, fuzzy search, POI search, nearby, routing, reachable range, traffic, EV routing, search along route, area search, EV search, data viz), plus invalid API key rejection and response time validation.
 
+**Cowork plugin tests** (static package validation + optional live gateway smoke):
+
+```powershell
+# Static only (validates manifest/skills, builds the .zip)
+.\tests\Invoke-CoworkPluginTests.ps1
+
+# With live gateway checks
+.\tests\Invoke-CoworkPluginTests.ps1 -GatewayUrl "https://<map-proxy>/api/mcp"
+```
+
+### 8. Build & deploy the Cowork plugin
+
+```powershell
+# Deploy the gateway to the map-proxy Container App
+.\deploy\Deploy-CoworkGateway.ps1 -TomTomApiKey "<YOUR_KEY>"
+
+# Validate + package the plugin into an uploadable .zip
+.\cowork-plugin\Build-CoworkPlugin.ps1
+```
+
+Then upload `cowork-plugin/dist/tomtom-cowork-plugin-1.0.0.zip` via the M365 Admin Center
+(**Copilot → Agents → All agents → Add agent**). See
+[cowork-plugin/COWORK-DEPLOYMENT-GUIDE.md](cowork-plugin/COWORK-DEPLOYMENT-GUIDE.md).
+
 ## Project Structure
 
 ```
 TomTom/
 +-- README.md                                  # This file
 +-- .gitignore
++-- docs/
+|   +-- COWORK-PLUGIN-PLAN.md                  # Cowork plugin design plan + alignment checklist
+|   +-- COWORK-IMPLEMENTATION-LOG.md           # Running change log + test evidence
++-- cowork-plugin/
+|   +-- manifest.json                          # M365 app manifest v1.28 (skills + connector)
+|   +-- color.png / outline.png                # Plugin icons (192x192 / 32x32)
+|   +-- New-Icons.ps1                          # Icon generator
+|   +-- Build-CoworkPlugin.ps1                 # Validate + package the .zip
+|   +-- README.md                              # Plugin overview
+|   +-- COWORK-DEPLOYMENT-GUIDE.md             # Register -> package -> upload -> enable -> test
+|   +-- skills/                                # 6 Agent Skills (live-map, search, route, traffic, ev, analytics)
 +-- deploy/
 |   +-- Deploy-TomTomMCP.ps1                   # Full Azure deployment (Orbis by default)
 |   +-- Deploy-OrbisUpgrade.ps1                # Upgrade existing deployment to Orbis
 |   +-- Deploy-InteractiveMap.ps1              # Deploy Static Web App for interactive map
 |   +-- Deploy-MapProxy.ps1                    # Deploy Azure Function App (map proxy)
 |   +-- Update-Container.ps1                   # Update container to latest image
+|   +-- Deploy-CoworkGateway.ps1               # Redeploy map-proxy w/ Cowork MCP gateway
 |   +-- Remove-TomTomMCP.ps1                   # Tear down all resources
 +-- interactive-map-app/
 |   +-- index.html                             # Single-page interactive map (TomTom SDK + MapLibre)
@@ -242,12 +295,15 @@ TomTom/
 |       +-- functions/
 |       |   +-- generateMapCard.ts             # POST endpoint: MCP tool -> Adaptive Card
 |       |   +-- getMapImage.ts                 # GET endpoint: MCP tool -> PNG image
+|       |   +-- mcpGateway.ts                  # POST /api/mcp -- Cowork MCP gateway route
 |       +-- lib/
 |           +-- mcpClient.ts                   # MCP JSON-RPC client with SSE parsing
+|           +-- mcpGateway.ts                  # Gateway logic + render_live_map tool
 |           +-- adaptiveCards.ts               # Adaptive Card builders (search, route, traffic, map)
 +-- tests/
 |   +-- Invoke-SmokeTests.ps1                  # 13 smoke tests (original 11 tools)
 |   +-- Invoke-OrbisTests.ps1                  # 18 Orbis tests (all 16 tools + security + perf)
+|   +-- Invoke-CoworkPluginTests.ps1           # Cowork package validation + live gateway smoke
 +-- power-platform/
 |   +-- TomTomMCP-connector.swagger.json       # OpenAPI definition for Power Automate
 |   +-- SETUP-GUIDE.md                         # Custom connector setup guide

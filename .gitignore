@@ -4,11 +4,18 @@ graph-connector/obj/
 map-proxy-api/dist/
 map-proxy-api/node_modules/
 interactive-map-app/node_modules/
+cowork-plugin/dist/
 
 # Secrets — never commit real credentials
 graph-connector/appsettings.json
 map-proxy-api/local.settings.json
 *.env
+
+# Browser/MCP test artifacts (console logs may contain API keys in URLs)
+.playwright-mcp/
+
+# Local scratch / verification scripts
+verify.ps1
 
 # Deployment artifacts with real IDs (generated at runtime)
 body1.json

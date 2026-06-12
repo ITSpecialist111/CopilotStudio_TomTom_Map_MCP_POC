@@ -1,0 +1,51 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/teams/v1.28/MicrosoftTeams.schema.json",
+  "manifestVersion": "1.28",
+  "version": "1.0.0",
+  "id": "8f2d6a3e-1b47-4c9a-bd58-3e7f0a2c6d91",
+  "developer": {
+    "name": "ABS",
+    "websiteUrl": "https://example.com/tomtom-cowork",
+    "privacyUrl": "https://example.com/tomtom-cowork/privacy",
+    "termsOfUseUrl": "https://example.com/tomtom-cowork/terms"
+  },
+  "name": {
+    "short": "TomTom Maps & Traffic",
+    "full": "TomTom Maps & Traffic for Copilot Cowork"
+  },
+  "description": {
+    "short": "Live TomTom maps, routing, traffic and EV tools for Cowork.",
+    "full": "Adds TomTom location intelligence to Microsoft Copilot Cowork: geocoding and place search, driving/EV route planning, real-time traffic, EV charging, and dynamic, live interactive map rendering. Skills correlate so search, routing, traffic and EV results are always shown on a map. Powered by the official TomTom MCP server via a gateway that keeps the API key server-side."
+  },
+  "icons": {
+    "color": "color.png",
+    "outline": "outline.png"
+  },
+  "accentColor": "#E2231A",
+  "agentSkills": [
+    { "folder": "./skills/tomtom-live-map" },
+    { "folder": "./skills/tomtom-location-search" },
+    { "folder": "./skills/tomtom-route-planning" },
+    { "folder": "./skills/tomtom-live-traffic" },
+    { "folder": "./skills/tomtom-ev-journey" },
+    { "folder": "./skills/tomtom-traffic-analytics" }
+  ],
+  "agentConnectors": [
+    {
+      "id": "tomtom-maps-traffic",
+      "displayName": "TomTom Maps & Traffic",
+      "description": "TomTom location, routing, traffic, EV and live-map tools via the ABS MCP gateway (API key injected server-side).",
+      "toolSource": {
+        "remoteMcpServer": {
+          "mcpServerUrl": "https://ca-tomtom-map-proxy.ashydesert-9fc5fdf3.uksouth.azurecontainerapps.io/api/mcp",
+          "mcpToolDescription": {
+            "file": "toolDescription.json"
+          },
+          "authorization": {
+            "type": "None"
+          }
+        }
+      }
+    }
+  ]
+}

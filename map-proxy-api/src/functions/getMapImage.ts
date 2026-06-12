@@ -63,7 +63,13 @@ async function getMapImage(req: Request, res: Response): Promise<void> {
       JSON.stringify(toolArgs).substring(0, 200)
     );
 
-    const result = await callMcpTool(tool, toolArgs, apiKey, mcpUrl);
+    const result = await callMcpTool(
+      tool,
+      toolArgs,
+      apiKey,
+      mcpUrl,
+      process.env.MCP_MAPS_BACKEND || "tomtom-orbis-maps"
+    );
 
     if (!result.imageBase64) {
       res.status(404).json({
