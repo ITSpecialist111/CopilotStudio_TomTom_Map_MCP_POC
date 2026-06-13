@@ -147,6 +147,53 @@
             height: 100%;
         }
 
+        /* ASCILINE-style live ASCII / pixel render overlay */
+        #ascii-canvas {
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            display: none;
+            background: #050505;
+            z-index: 5;
+            pointer-events: none;   /* drag/scroll pass through to the live map */
+        }
+        body.ascii-on #ascii-canvas { display: block; }
+        /* In ASCII/pixel mode hide the raw map chrome so only the art shows */
+        body.ascii-on .maplibregl-control-container,
+        body.ascii-on .mapboxgl-control-container { display: none !important; }
+        body.ascii-on #attribution {
+            background: rgba(5,5,5,0.7);
+            color: #00ff41;
+            text-shadow: 0 0 6px rgba(0,255,65,0.5);
+        }
+        #ascii-badge {
+            position: fixed;
+            left: 12px;
+            bottom: 10px;
+            z-index: 999;
+            display: none;
+            align-items: center;
+            gap: 8px;
+            font-family: 'Consolas','SF Mono',Menlo,monospace;
+            font-size: 12px;
+            letter-spacing: 0.4px;
+            color: #00ff41;
+            background: rgba(5,5,5,0.65);
+            border: 1px solid rgba(0,255,65,0.35);
+            border-radius: 6px;
+            padding: 5px 10px;
+            text-shadow: 0 0 6px rgba(0,255,65,0.6);
+            pointer-events: none;
+        }
+        body.ascii-on #ascii-badge { display: flex; }
+        #ascii-badge .dot {
+            width: 8px; height: 8px; border-radius: 50%;
+            background: #00ff41; box-shadow: 0 0 8px #00ff41;
+            animation: ascii-pulse 1.4s ease-in-out infinite;
+        }
+        @keyframes ascii-pulse { 0%,100% { opacity: 1; } 50% { opacity: .35; } }
+
         /* Attribution */
         #attribution {
             position: fixed;
@@ -355,6 +402,10 @@
             <span class="header-title" id="header-title">TomTom Interactive Map</span>
         </div>
         <div class="header-controls">
+            <button class="header-btn" id="btn-ascii" title="Live ASCII / pixel map">
+                <span>&#9638;</span>
+                <span class="btn-label" id="ascii-label">ASCII</span>
+            </button>
             <button class="header-btn" id="btn-traffic" title="Toggle traffic layer">
                 <span>&#128678;</span>
                 <span class="btn-label">Traffic</span>
@@ -369,10 +420,14 @@
     <!-- Map -->
     <div id="map-container">
         <div id="map"></div>
+        <canvas id="ascii-canvas"></canvas>
     </div>
 
     <!-- Attribution -->
     <div id="attribution">Powered by TomTom</div>
+
+    <!-- ASCII / pixel mode badge -->
+    <div id="ascii-badge"><span class="dot"></span><span id="ascii-badge-text">ASCII MODE</span></div>
 
     <!-- Loading -->
     <div id="loading-overlay">
@@ -445,6 +500,9 @@
                 traffic: params.get('traffic') === 'true',
                 vizId:   params.get('vizId') || '',
                 mcpUrl:  params.get('mcpUrl') || '',
+                overlay: params.get('overlay') || '',
+                render:  (params.get('render') || '').toLowerCase(),  // '' | 'ascii' | 'pixel'
+                cols:    parseInt(params.get('cols'), 10) || 0,
                 title:   params.get('title') || 'TomTom Interactive Map'
             };
         }
@@ -552,6 +610,31 @@
             trafficOn = !trafficOn;
             btnTraffic.classList.toggle('active', trafficOn);
             toggleTraffic(trafficOn);
+        });
+
+        // ───────────────────────────────────────────
+        // ASCII / pixel render-mode toggle (cycles Map → ASCII → Pixel)
+        // ───────────────────────────────────────────
+        var btnAscii = document.getElementById('btn-ascii');
+        var asciiLabel = document.getElementById('ascii-label');
+        function currentRenderMode() {
+            return params.render === 'pixel' ? 'pixel' : (params.render === 'ascii' ? 'ascii' : 'map');
+        }
+        (function initAsciiButton() {
+            var cur = currentRenderMode();
+            var labels = { map: 'ASCII', ascii: 'Pixel', pixel: 'Normal' };
+            if (asciiLabel) asciiLabel.textContent = labels[cur];
+            btnAscii.classList.toggle('active', cur !== 'map');
+            btnAscii.title = cur === 'map' ? 'Switch to live ASCII map'
+                : cur === 'ascii' ? 'Switch to live pixel map' : 'Back to the normal map';
+        })();
+        btnAscii.addEventListener('click', function() {
+            var cur = currentRenderMode();
+            var next = cur === 'map' ? 'ascii' : (cur === 'ascii' ? 'pixel' : 'map');
+            var u = new URL(window.location.href);
+            if (next === 'map') u.searchParams.delete('render');
+            else u.searchParams.set('render', next);
+            window.location.assign(u.toString());
         });
 
         function toggleTraffic(show) {
@@ -917,6 +1000,413 @@
         }
 
         // ───────────────────────────────────────────
+        // Live data overlays (heatmap + clustering + polygons)
+        // ───────────────────────────────────────────
+        // Each overlay fetches a public, CORS-enabled feed in the browser and
+        // renders it as a heatmap of hotspots + clustered markers (points) or
+        // severity-coloured areas (polygons). Triggered via ?overlay=key1,key2.
+        function ovToJson(res) { if (!res.ok) throw new Error('HTTP ' + res.status); return res.json(); }
+        function tflProp(s, name) {
+            var ap = s && s.additionalProperties; if (!Array.isArray(ap)) return null;
+            for (var i = 0; i < ap.length; i++) { if (ap[i].key === name) { var n = parseInt(ap[i].value, 10); return isNaN(n) ? ap[i].value : n; } }
+            return null;
+        }
+
+        var OVERLAYS = {
+            'earthquakes': {
+                label: 'Earthquakes — USGS, last 30 days, M2.5+',
+                kind: 'points', color: '#ff5a36', fitToData: true, weightMax: 8,
+                fetch: function () { return fetch('https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/2.5_month.geojson').then(ovToJson); },
+                toFeatures: function (d) { return (d && d.features) ? d.features : []; },
+                weight: function (f) { var m = f.properties && f.properties.mag; return (typeof m === 'number' && m > 0) ? m : 1; },
+                popup: function (p) { return '<div class="popup-title">M ' + (p.mag != null ? p.mag : '?') + '</div>' + (p.place ? '<div class="popup-description">' + escapeHtml(p.place) + '</div>' : '') + (p.time ? '<div class="popup-coords">' + new Date(p.time).toUTCString() + '</div>' : ''); }
+            },
+            'uk-crime': {
+                label: 'UK street crime — Police.uk, latest month',
+                kind: 'points', color: '#7b2ff7', fitToData: false, weightMax: 1, needsCenter: true,
+                fetch: function (center) { var c = center || { lat: 51.5074, lon: -0.1278 }; return fetch('https://data.police.uk/api/crimes-street/all-crime?lat=' + c.lat + '&lng=' + c.lon).then(ovToJson); },
+                toFeatures: function (arr) {
+                    if (!Array.isArray(arr)) return []; var out = [];
+                    arr.forEach(function (x) {
+                        var lat = parseFloat(x.location && x.location.latitude), lon = parseFloat(x.location && x.location.longitude);
+                        if (isNaN(lat) || isNaN(lon)) return;
+                        out.push({ type: 'Feature', geometry: { type: 'Point', coordinates: [lon, lat] }, properties: { category: (x.category || '').replace(/-/g, ' '), street: (x.location.street && x.location.street.name) || '', month: x.month || '' } });
+                    });
+                    return out;
+                },
+                weight: function () { return 1; },
+                popup: function (p) { return '<div class="popup-title">' + escapeHtml(p.category || 'Crime') + '</div>' + (p.street ? '<div class="popup-description">' + escapeHtml(p.street) + '</div>' : '') + (p.month ? '<div class="popup-coords">' + escapeHtml(p.month) + '</div>' : ''); }
+            },
+            'uk-bikes': {
+                label: 'London cycle hire — TfL Santander Cycles',
+                kind: 'points', color: '#0a8a3f', fitToData: true, weightMax: 1,
+                fetch: function () { return fetch('https://api.tfl.gov.uk/BikePoint').then(ovToJson); },
+                toFeatures: function (arr) {
+                    if (!Array.isArray(arr)) return []; var out = [];
+                    arr.forEach(function (s) {
+                        var lat = parseFloat(s.lat), lon = parseFloat(s.lon); if (isNaN(lat) || isNaN(lon)) return;
+                        out.push({ type: 'Feature', geometry: { type: 'Point', coordinates: [lon, lat] }, properties: { name: s.commonName || 'Docking station', bikes: tflProp(s, 'NbBikes'), docks: tflProp(s, 'NbEmptyDocks') } });
+                    });
+                    return out;
+                },
+                weight: function () { return 1; },
+                popup: function (p) { return '<div class="popup-title">' + escapeHtml(p.name || '') + '</div><div class="popup-description">Bikes available: ' + (p.bikes != null ? p.bikes : '?') + ' &middot; Empty docks: ' + (p.docks != null ? p.docks : '?') + '</div>'; }
+            },
+            'uk-floods': {
+                label: 'UK flood warnings — Environment Agency',
+                kind: 'polygons', color: '#b00020', fitToData: true,
+                fetch: function () {
+                    return fetch('https://environment.data.gov.uk/flood-monitoring/id/floods').then(ovToJson).then(function (d) {
+                        var items = (d && d.items) ? d.items.slice(0, 60) : [];
+                        if (items.length === 0) return { type: 'FeatureCollection', features: [] };
+                        return Promise.all(items.map(function (it) {
+                            if (!it.floodArea || !it.floodArea.polygon) return [];
+                            return fetch(it.floodArea.polygon).then(ovToJson).then(function (poly) {
+                                var feats = (poly && poly.features) ? poly.features : [];
+                                feats.forEach(function (ft) { ft.properties = ft.properties || {}; ft.properties.severity = it.severity; ft.properties.severityLevel = it.severityLevel; ft.properties.description = it.description || it.message || ''; });
+                                return feats;
+                            }).catch(function () { return []; });
+                        })).then(function (groups) { var all = []; groups.forEach(function (g) { all = all.concat(g); }); return { type: 'FeatureCollection', features: all }; });
+                    });
+                },
+                popup: function (p) { return '<div class="popup-title">' + escapeHtml(p.severity || 'Flood warning') + '</div>' + (p.description ? '<div class="popup-description">' + escapeHtml(p.description) + '</div>' : ''); }
+            },
+            'uk-tube': {
+                label: 'London Underground status — TfL',
+                kind: 'lines', fitToData: true,
+                // Official TfL line colours.
+                colors: {
+                    bakerloo: '#B36305', central: '#E32017', circle: '#FFD300', district: '#00782A',
+                    'hammersmith-city': '#F3A9BB', jubilee: '#A0A5A9', metropolitan: '#9B0056',
+                    northern: '#000000', piccadilly: '#003688', victoria: '#0098D4', 'waterloo-city': '#95CDBA'
+                },
+                fetch: function () {
+                    var COLORS = this.colors; var self = this;
+                    self._legend = [];
+                    return fetch('https://api.tfl.gov.uk/Line/Mode/tube/Status').then(ovToJson).then(function (lines) {
+                        return Promise.all(lines.map(function (ln) {
+                            var st = (ln.lineStatuses && ln.lineStatuses[0] && ln.lineStatuses[0].statusSeverityDescription) || 'Unknown';
+                            var disrupted = st.toLowerCase().indexOf('good service') === -1;
+                            var color = COLORS[ln.id] || '#666';
+                            self._legend.push({ color: color, text: ln.name + ' — ' + st });
+                            return fetch('https://api.tfl.gov.uk/Line/' + ln.id + '/Route/Sequence/inbound?serviceTypes=Regular&excludeCrowding=true').then(ovToJson).then(function (r) {
+                                var feats = [];
+                                (r.lineStrings || []).forEach(function (s) {
+                                    var coords; try { coords = JSON.parse(s); } catch (e) { return; }
+                                    feats.push({ type: 'Feature', geometry: { type: 'MultiLineString', coordinates: coords }, properties: { name: ln.name, status: st, disrupted: disrupted, color: color } });
+                                });
+                                return feats;
+                            }).catch(function () { return []; });
+                        })).then(function (groups) { var all = []; groups.forEach(function (g) { all = all.concat(g); }); return { type: 'FeatureCollection', features: all }; });
+                    });
+                },
+                legend: function () { return this._legend || []; },
+                popup: function (p) { return '<div class="popup-title">' + escapeHtml(p.name || 'Tube line') + '</div><div class="popup-description">' + escapeHtml(p.status || '') + '</div>'; }
+            }
+        };
+        function ovPopupClass() { return (typeof tt !== 'undefined' && tt.Popup) ? tt.Popup : maplibregl.Popup; }
+        function ovBoundsClass() { return (typeof tt !== 'undefined' && tt.LngLatBounds) ? tt.LngLatBounds : maplibregl.LngLatBounds; }
+        function ovOpenPopup(lngLat, html) { try { new (ovPopupClass())({ offset: 12, className: 'marker-popup' }).setLngLat(lngLat).setHTML(html).addTo(map); } catch (e) { console.warn(e); } }
+        function ovCursor(layerId) {
+            map.on('mouseenter', layerId, function () { map.getCanvas().style.cursor = 'pointer'; });
+            map.on('mouseleave', layerId, function () { map.getCanvas().style.cursor = ''; });
+        }
+        function ovEachCoord(g, cb) {
+            if (!g) return;
+            if (g.type === 'Point') cb(g.coordinates);
+            else if (g.type === 'MultiPoint' || g.type === 'LineString') g.coordinates.forEach(cb);
+            else if (g.type === 'MultiLineString' || g.type === 'Polygon') g.coordinates.forEach(function (r) { r.forEach(cb); });
+            else if (g.type === 'MultiPolygon') g.coordinates.forEach(function (p) { p.forEach(function (r) { r.forEach(cb); }); });
+        }
+        function ovFit(fc) {
+            if (!fc.features.length) return;
+            var b = new (ovBoundsClass())(); var n = 0;
+            fc.features.forEach(function (f) { ovEachCoord(f.geometry, function (c) { if (c && c.length >= 2) { b.extend([c[0], c[1]]); n++; } }); });
+            if (n > 0 && !b.isEmpty()) { try { map.fitBounds(b, { padding: 50, maxZoom: 12 }); } catch (e) { } }
+        }
+
+        function addPointsOverlay(key, def, fc) {
+            fc.features.forEach(function (f) { f.properties = f.properties || {}; f.properties.w = def.weight ? def.weight(f) : 1; });
+            var heatSrc = 'ov-' + key + '-h', cluSrc = 'ov-' + key + '-c', col = def.color || '#ff5a36', wmax = def.weightMax || 1;
+            if (map.getSource(heatSrc)) { map.getSource(heatSrc).setData(fc); } else { map.addSource(heatSrc, { type: 'geojson', data: fc }); }
+            if (map.getSource(cluSrc)) { map.getSource(cluSrc).setData(fc); } else { map.addSource(cluSrc, { type: 'geojson', data: fc, cluster: true, clusterRadius: 50, clusterMaxZoom: 14 }); }
+            if (!map.getLayer('ov-' + key + '-heat')) map.addLayer({
+                id: 'ov-' + key + '-heat', type: 'heatmap', source: heatSrc, maxzoom: 11, paint: {
+                    'heatmap-weight': ['interpolate', ['linear'], ['get', 'w'], 0, 0, wmax, 1],
+                    'heatmap-intensity': ['interpolate', ['linear'], ['zoom'], 0, 1, 11, 3],
+                    'heatmap-radius': ['interpolate', ['linear'], ['zoom'], 0, 6, 9, 30],
+                    'heatmap-opacity': ['interpolate', ['linear'], ['zoom'], 7, 0.9, 11, 0]
+                }
+            });
+            if (!map.getLayer('ov-' + key + '-clusters')) map.addLayer({
+                id: 'ov-' + key + '-clusters', type: 'circle', source: cluSrc, filter: ['has', 'point_count'], paint: {
+                    'circle-color': col, 'circle-opacity': 0.85,
+                    'circle-radius': ['step', ['get', 'point_count'], 14, 25, 18, 100, 24, 500, 32],
+                    'circle-stroke-width': 2, 'circle-stroke-color': '#ffffff'
+                }
+            });
+            if (!map.getLayer('ov-' + key + '-count')) map.addLayer({
+                id: 'ov-' + key + '-count', type: 'symbol', source: cluSrc, filter: ['has', 'point_count'],
+                layout: { 'text-field': ['get', 'point_count_abbreviated'], 'text-size': 12 }, paint: { 'text-color': '#ffffff' }
+            });
+            if (!map.getLayer('ov-' + key + '-pts')) map.addLayer({
+                id: 'ov-' + key + '-pts', type: 'circle', source: cluSrc, filter: ['!', ['has', 'point_count']], paint: {
+                    'circle-color': col, 'circle-radius': 5, 'circle-opacity': 0.9, 'circle-stroke-width': 1, 'circle-stroke-color': '#ffffff'
+                }
+            });
+            map.on('click', 'ov-' + key + '-clusters', function (e) {
+                var feats = map.queryRenderedFeatures(e.point, { layers: ['ov-' + key + '-clusters'] });
+                if (!feats.length) return; var cid = feats[0].properties.cluster_id;
+                map.getSource(cluSrc).getClusterExpansionZoom(cid, function (err, z) { if (err) return; map.easeTo({ center: feats[0].geometry.coordinates, zoom: z }); });
+            });
+            map.on('click', 'ov-' + key + '-pts', function (e) { ovOpenPopup(e.lngLat, def.popup(e.features[0].properties)); });
+            ovCursor('ov-' + key + '-clusters'); ovCursor('ov-' + key + '-pts');
+        }
+
+        function addPolygonOverlay(key, def, fc) {
+            var src = 'ov-' + key + '-s';
+            if (map.getSource(src)) { map.getSource(src).setData(fc); } else { map.addSource(src, { type: 'geojson', data: fc }); }
+            var fillColor = ['match', ['get', 'severityLevel'], 1, '#b00020', 2, '#e65100', 3, '#f9a825', '#9e9e9e'];
+            if (!map.getLayer('ov-' + key + '-fill')) map.addLayer({ id: 'ov-' + key + '-fill', type: 'fill', source: src, paint: { 'fill-color': fillColor, 'fill-opacity': 0.35 } });
+            if (!map.getLayer('ov-' + key + '-out')) map.addLayer({ id: 'ov-' + key + '-out', type: 'line', source: src, paint: { 'line-color': fillColor, 'line-width': 2 } });
+            map.on('click', 'ov-' + key + '-fill', function (e) { ovOpenPopup(e.lngLat, def.popup(e.features[0].properties)); });
+            ovCursor('ov-' + key + '-fill');
+        }
+
+        function addLinesOverlay(key, def, fc) {
+            // Draws line geometries in a per-feature `color`; any feature flagged
+            // `disrupted` gets a white dashed overlay so it stands out (e.g. a tube
+            // line with delays). Used by the uk-tube status overlay.
+            var src = 'ov-' + key + '-s';
+            if (map.getSource(src)) { map.getSource(src).setData(fc); } else { map.addSource(src, { type: 'geojson', data: fc }); }
+            if (!map.getLayer('ov-' + key + '-line')) map.addLayer({
+                id: 'ov-' + key + '-line', type: 'line', source: src, layout: { 'line-join': 'round', 'line-cap': 'round' },
+                paint: { 'line-color': ['get', 'color'], 'line-width': ['interpolate', ['linear'], ['zoom'], 8, 2.5, 14, 6], 'line-opacity': 0.92 }
+            });
+            if (!map.getLayer('ov-' + key + '-dash')) map.addLayer({
+                id: 'ov-' + key + '-dash', type: 'line', source: src, filter: ['==', ['get', 'disrupted'], true],
+                layout: { 'line-join': 'round', 'line-cap': 'butt' },
+                paint: { 'line-color': '#ffffff', 'line-width': ['interpolate', ['linear'], ['zoom'], 8, 1.2, 14, 2.5], 'line-dasharray': [2, 2], 'line-opacity': 0.95 }
+            });
+            map.on('click', 'ov-' + key + '-line', function (e) { ovOpenPopup(e.lngLat, def.popup(e.features[0].properties)); });
+            ovCursor('ov-' + key + '-line');
+        }
+
+        function ovLegendEnsure() {
+            var lg = document.getElementById('ov-legend');
+            if (!lg) {
+                lg = document.createElement('div'); lg.id = 'ov-legend'; lg.className = 'ov-legend';
+                var h = document.createElement('div'); h.className = 'ov-legend-h'; h.textContent = 'Live data overlays'; lg.appendChild(h);
+                document.body.appendChild(lg);
+            }
+            return lg;
+        }
+        function ovLegendRow(color, text) {
+            var lg = ovLegendEnsure();
+            var row = document.createElement('div'); row.className = 'ov-legend-row';
+            var sw = document.createElement('span'); sw.className = 'ov-sw'; sw.style.background = color || '#b00020';
+            var txt = document.createElement('span'); txt.className = 'ov-legend-txt'; txt.textContent = text;
+            row.appendChild(sw); row.appendChild(txt); lg.appendChild(row);
+        }
+        function ovLegendAdd(def, count) {
+            ovLegendRow(def.color || '#b00020', def.label + (count < 0 ? ' — unavailable' : (count === 0 ? ' — none active' : ' (' + count + ')')));
+        }
+
+        function ovInjectCss() {
+            if (document.getElementById('ov-css')) return;
+            var st = document.createElement('style'); st.id = 'ov-css';
+            st.textContent =
+                '.ov-legend{position:fixed;left:12px;bottom:12px;z-index:1200;background:var(--bg-primary);color:var(--text-primary);' +
+                'border:1px solid var(--border);border-radius:8px;box-shadow:var(--shadow);padding:8px 10px;max-width:300px;font-size:12px;}' +
+                '.ov-legend-h{font-weight:600;margin-bottom:6px;}' +
+                '.ov-legend-row{display:flex;align-items:center;gap:8px;margin-top:4px;line-height:1.3;}' +
+                '.ov-sw{width:12px;height:12px;border-radius:3px;flex-shrink:0;border:1px solid rgba(0,0,0,.2);}';
+            document.head.appendChild(st);
+        }
+
+        function addOverlay(key, center) {
+            var def = OVERLAYS[key];
+            if (!def) { console.warn('Unknown overlay:', key); return Promise.resolve(); }
+            return def.fetch(center).then(function (raw) {
+                if (def.kind === 'polygons') {
+                    var fcp = (raw && raw.type === 'FeatureCollection') ? raw : { type: 'FeatureCollection', features: [] };
+                    addPolygonOverlay(key, def, fcp); ovLegendAdd(def, fcp.features.length);
+                    if (def.fitToData && fcp.features.length) ovFit(fcp);
+                } else if (def.kind === 'lines') {
+                    var fcl = (raw && raw.type === 'FeatureCollection') ? raw : { type: 'FeatureCollection', features: [] };
+                    addLinesOverlay(key, def, fcl);
+                    if (def.legend) { def.legend(fcl).forEach(function (r) { ovLegendRow(r.color, r.text); }); }
+                    else { ovLegendAdd(def, fcl.features.length); }
+                    if (def.fitToData && fcl.features.length) ovFit(fcl);
+                } else {
+                    var feats = def.toFeatures(raw) || [];
+                    var fcpt = { type: 'FeatureCollection', features: feats };
+                    addPointsOverlay(key, def, fcpt); ovLegendAdd(def, feats.length);
+                    if (def.fitToData && feats.length) ovFit(fcpt);
+                }
+            }).catch(function (e) { console.warn('Overlay "' + key + '" failed:', e); ovLegendAdd(def, -1); });
+        }
+
+        function renderOverlays(center) {
+            var keys = (params.overlay || '').split(',').map(function (s) { return s.trim().toLowerCase(); }).filter(Boolean);
+            if (!keys.length) return;
+            ovInjectCss();
+            keys.forEach(function (k) { addOverlay(k, center); });
+        }
+
+        // ───────────────────────────────────────────
+        // ASCILINE-style live ASCII / pixel map renderer
+        // Samples the live MapLibre WebGL canvas each frame and re-draws it
+        // as colored ASCII glyphs (luminance ramp) or colored blocks (pixel).
+        // The map keeps rendering underneath, so pan/zoom updates the art live.
+        // ───────────────────────────────────────────
+        var ascii = {
+            mode: '', on: false, canvas: null, ctx: null, off: null, offCtx: null,
+            cols: 0, dpr: 1, scheduled: false, lastDraw: 0
+        };
+        var ASCII_RAMP = ' .:-=+*#%@';   // luminance ramp: dark -> dense
+
+        function asciiActive() { return ascii.mode === 'ascii' || ascii.mode === 'pixel'; }
+        function asciiDefaultCols(mode) { return params.cols || (mode === 'pixel' ? 240 : 150); }
+
+        function setupAsciiCanvas() {
+            if (ascii.canvas) return;
+            ascii.canvas = document.getElementById('ascii-canvas');
+            ascii.ctx = ascii.canvas.getContext('2d');
+            ascii.off = document.createElement('canvas');
+            ascii.offCtx = ascii.off.getContext('2d', { willReadFrequently: true });
+        }
+
+        function resizeAsciiCanvas() {
+            if (!ascii.canvas) return;
+            var dpr = window.devicePixelRatio || 1;
+            if (ascii.mode === 'ascii') dpr = Math.min(dpr, 1.5); // cap for glyph perf
+            ascii.dpr = dpr;
+            var w = ascii.canvas.clientWidth, h = ascii.canvas.clientHeight;
+            ascii.canvas.width = Math.max(1, Math.round(w * dpr));
+            ascii.canvas.height = Math.max(1, Math.round(h * dpr));
+        }
+
+        function scheduleAscii() {
+            if (!asciiActive() || ascii.scheduled) return;
+            ascii.scheduled = true;
+            requestAnimationFrame(function (t) {
+                ascii.scheduled = false;
+                if (t - ascii.lastDraw < 28) { scheduleAscii(); return; } // ~30fps
+                ascii.lastDraw = t;
+                renderAsciiFrame();
+            });
+        }
+
+        var asciiFellBack = false;
+        function asciiSecurityFallback() {
+            if (asciiFellBack) return;
+            asciiFellBack = true;
+            console.warn('ASCII sampling blocked (map pixels not readable).');
+            var el = document.getElementById('ascii-badge-text');
+            if (el) el.textContent = 'ASCII unavailable (map pixels not readable)';
+        }
+
+        function renderAsciiFrame() {
+            if (!asciiActive() || !map) return;
+            var src;
+            try { src = map.getCanvas(); } catch (e) { return; }
+            if (!src || !src.width) return;
+
+            var cssW = ascii.canvas.clientWidth, cssH = ascii.canvas.clientHeight;
+            if (!cssW || !cssH) return;
+            if (ascii.canvas.width !== Math.round(cssW * ascii.dpr)) resizeAsciiCanvas();
+
+            var cols = ascii.cols;
+            var charAspect = (ascii.mode === 'pixel') ? 1 : 0.55; // glyph width/height
+            var cellW = cssW / cols;
+            var cellH = cellW / charAspect;
+            var rows = Math.max(1, Math.ceil(cssH / cellH));
+
+            var off = ascii.off, octx = ascii.offCtx;
+            if (off.width !== cols || off.height !== rows) { off.width = cols; off.height = rows; }
+
+            try { octx.drawImage(src, 0, 0, cols, rows); }
+            catch (e) { return; }
+
+            var data;
+            try { data = octx.getImageData(0, 0, cols, rows).data; }
+            catch (e) { asciiSecurityFallback(); return; }
+
+            var ctx = ascii.ctx;
+            ctx.setTransform(ascii.dpr, 0, 0, ascii.dpr, 0, 0);
+            ctx.fillStyle = '#050505';
+            ctx.fillRect(0, 0, cssW, cssH);
+
+            if (ascii.mode === 'pixel') {
+                for (var y = 0; y < rows; y++) {
+                    for (var x = 0; x < cols; x++) {
+                        var i = (y * cols + x) * 4;
+                        if (data[i + 3] === 0) continue;
+                        ctx.fillStyle = 'rgb(' + data[i] + ',' + data[i + 1] + ',' + data[i + 2] + ')';
+                        ctx.fillRect(x * cellW, y * cellH, cellW + 0.6, cellH + 0.6);
+                    }
+                }
+            } else {
+                var fs = cellH * 1.05;
+                ctx.font = '700 ' + fs.toFixed(1) + "px 'Consolas','SF Mono',Menlo,monospace";
+                ctx.textBaseline = 'top';
+                var rampMax = ASCII_RAMP.length - 1;
+                for (var y2 = 0; y2 < rows; y2++) {
+                    for (var x2 = 0; x2 < cols; x2++) {
+                        var j = (y2 * cols + x2) * 4;
+                        var r = data[j], g = data[j + 1], b = data[j + 2];
+                        var lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+                        var ch = ASCII_RAMP[Math.round(lum * rampMax)];
+                        if (ch === ' ') continue;
+                        ctx.fillStyle = 'rgb(' + r + ',' + g + ',' + b + ')';
+                        ctx.fillText(ch, x2 * cellW, y2 * cellH);
+                    }
+                }
+            }
+
+            var badge = document.getElementById('ascii-badge-text');
+            if (badge && !asciiFellBack) {
+                badge.textContent = (ascii.mode === 'pixel' ? 'PIXEL' : 'ASCII') +
+                    ' MODE · ' + cols + '×' + rows + ' · drag to pan, scroll to zoom';
+            }
+        }
+
+        function onAsciiResize() {
+            if (!asciiActive()) return;
+            resizeAsciiCanvas();
+            scheduleAscii();
+        }
+
+        function enableAscii(mode) {
+            if (ascii.on) return;            // idempotent
+            ascii.on = true;
+            ascii.mode = (mode === 'pixel') ? 'pixel' : 'ascii';
+            ascii.cols = asciiDefaultCols(ascii.mode);
+            document.body.classList.add('ascii-on');
+            setupAsciiCanvas();
+            resizeAsciiCanvas();
+            map.on('render', scheduleAscii);   // live update while map repaints
+            map.on('moveend', renderAsciiFrame);
+            window.addEventListener('resize', onAsciiResize);
+            renderAsciiFrame();
+        }
+
+        // Start ASCII as soon as the map can paint anything — don't wait for the
+        // (sometimes slow) full 'load' event. The render loop then fills in tiles
+        // progressively as they stream in, so the view never hangs on the spinner.
+        function armAscii(mode) {
+            function go() {
+                if (ascii.on) return;
+                hideLoading();
+                enableAscii(mode);
+            }
+            map.on('load', go);
+            map.once('styledata', function () { setTimeout(go, 250); });
+            setTimeout(go, 2500);            // hard fallback
+        }
+
+        // ───────────────────────────────────────────
         // Initialize map
         // ───────────────────────────────────────────
         function init() {
@@ -935,8 +1425,11 @@
             var markersData = decodeBase64Json(params.markers);
             var routeData = decodeBase64Json(params.route);
 
-            // Try TomTom SDK first
-            if (typeof tt !== 'undefined' && tt.map) {
+            // ASCII / pixel mode needs readable WebGL pixels -> force MapLibre + preserveDrawingBuffer
+            var wantAscii = (params.render === 'ascii' || params.render === 'pixel');
+
+            // Try TomTom SDK first (unless ASCII/pixel mode, which requires MapLibre)
+            if (typeof tt !== 'undefined' && tt.map && !wantAscii) {
                 try {
                     map = tt.map({
                         key: params.apiKey,
@@ -976,6 +1469,9 @@
                                 if (vizData) applyVizData(vizData);
                             });
                         }
+
+                        // Live data overlays (earthquakes / UK crime / floods / bikes)
+                        renderOverlays(center);
                     });
 
                     map.on('error', function(e) {
@@ -999,11 +1495,15 @@
                         style: vectorStyleUrl,
                         center: [center.lon, center.lat],
                         zoom: params.zoom,
-                        attributionControl: true
+                        attributionControl: true,
+                        preserveDrawingBuffer: wantAscii
                     });
 
                     map.addControl(new maplibregl.NavigationControl(), 'top-right');
                     map.addControl(new maplibregl.FullscreenControl(), 'top-right');
+
+                    // ASCII / pixel live render mode — arm early so it doesn't wait on full load
+                    if (wantAscii) armAscii(params.render);
 
                     map.on('load', function() {
                         hideLoading();
@@ -1032,6 +1532,9 @@
                                 if (vizData) applyVizData(vizData);
                             });
                         }
+
+                        // Live data overlays (earthquakes / UK crime / floods / bikes)
+                        renderOverlays(center);
                     });
 
                     map.on('error', function(e) {

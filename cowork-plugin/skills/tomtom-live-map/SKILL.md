@@ -40,9 +40,26 @@ all finish by calling this skill so the user always gets a map, not just text.
   - `route` — `{ origin {lat,lon,label?}, destination {lat,lon,label?}, waypoints?, travelMode? }`
     for a road-following route.
   - `traffic` — `true` to overlay live traffic.
+  - `animate` — `true` to return an **animated map**: a looping GIF that flies/zooms in to the
+    location, rendered inline. Use it when the user asks to "animate", "fly to", "zoom into", or
+    wants something cinematic. Optional `animationEffect` is `zoom-in` (default) or `zoom-out`.
+  - `overlays` — array of live-data layers to add to the **interactive** map (heatmap + clustered
+    markers, or coloured areas/lines). Allowed values:
+    - `earthquakes` — global seismic activity, USGS, last 30 days (M2.5+).
+    - `uk-crime` — Police.uk street crime near the map centre (set `center` to a UK location).
+    - `uk-floods` — Environment Agency flood-warning areas.
+    - `uk-bikes` — London cycle hire (TfL Santander Cycles) docking stations.
+    - `uk-tube` — live London Underground line status (lines drawn in their colours; delays
+      highlighted with a dashed overlay). Centre on London.
   - `center`, `zoom`, `width`, `height` — optional; auto-calculated when omitted.
 - `tomtom-dynamic-map` — advanced/manual rendering (polygons, circles, multiple route plans). Prefer
   `render_live_map` unless you need shapes or several independent routes on one image.
+
+> **Overlays render on the interactive map** (the "Open the interactive live map" link), which has a
+> live map engine for heatmaps, clustering, and coloured regions/lines. The inline static image shows
+> the base map; tell the user to open the interactive map to explore the overlay. Example prompt that
+> maps to an overlay: *"Visualise global earthquake activity from the past 30 days as a heatmap"* →
+> `render_live_map({ title: "Global earthquakes (30 days)", overlays: ["earthquakes"] })`.
 
 ## Workflow
 

@@ -11,9 +11,11 @@
     "start": "node dist/server.js"
   },
   "dependencies": {
+    "@modelcontextprotocol/ext-apps": "^1.7.4",
     "axios": "^1.7.0",
     "cors": "^2.8.5",
     "express": "^4.21.0",
+    "gifenc": "^1.0.3",
     "jimp": "^0.22.12"
   },
   "devDependencies": {

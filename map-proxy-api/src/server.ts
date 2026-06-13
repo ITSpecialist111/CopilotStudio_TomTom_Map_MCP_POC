@@ -2,6 +2,7 @@ import express from "express";
 import cors from "cors";
 import generateMapCard from "./functions/generateMapCard";
 import getMapImage from "./functions/getMapImage";
+import getMapAnimation from "./functions/getMapAnimation";
 import { mcpGateway, mcpGatewayProbe, mcpDiag } from "./functions/mcpGateway";
 
 const app = express();
@@ -28,6 +29,9 @@ app.post("/api/generate-map-card", generateMapCard);
 
 // Map image proxy (GET)
 app.get("/api/get-map-image", getMapImage);
+
+// Animated map proxy — returns a looping GIF fly-in (GET)
+app.get("/api/get-map-animation", getMapAnimation);
 
 // MCP gateway for Microsoft Copilot Cowork (Streamable HTTP, JSON-RPC 2.0)
 app.post("/api/mcp", mcpGateway);

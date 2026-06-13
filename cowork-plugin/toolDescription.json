@@ -26,13 +26,6 @@
       },
       "execution": {
         "taskSupport": "forbidden"
-      },
-      "_meta": {
-        "ui": {
-          "visibility": [
-            "app"
-          ]
-        }
       }
     },
     {
@@ -141,13 +134,6 @@
       },
       "execution": {
         "taskSupport": "forbidden"
-      },
-      "_meta": {
-        "backend": "tomtom-orbis-maps",
-        "ui/resourceUri": "ui://tomtom-search/geocode/app.html",
-        "ui": {
-          "resourceUri": "ui://tomtom-search/geocode/app.html"
-        }
       }
     },
     {
@@ -267,13 +253,6 @@
       },
       "execution": {
         "taskSupport": "forbidden"
-      },
-      "_meta": {
-        "backend": "tomtom-orbis-maps",
-        "ui/resourceUri": "ui://tomtom-search/reverse-geocode/app.html",
-        "ui": {
-          "resourceUri": "ui://tomtom-search/reverse-geocode/app.html"
-        }
       }
     },
     {
@@ -441,13 +420,6 @@
       },
       "execution": {
         "taskSupport": "forbidden"
-      },
-      "_meta": {
-        "backend": "tomtom-orbis-maps",
-        "ui/resourceUri": "ui://tomtom-search/fuzzy-search/app.html",
-        "ui": {
-          "resourceUri": "ui://tomtom-search/fuzzy-search/app.html"
-        }
       }
     },
     {
@@ -603,13 +575,6 @@
       },
       "execution": {
         "taskSupport": "forbidden"
-      },
-      "_meta": {
-        "backend": "tomtom-orbis-maps",
-        "ui/resourceUri": "ui://tomtom-search/poi-search/app.html",
-        "ui": {
-          "resourceUri": "ui://tomtom-search/poi-search/app.html"
-        }
       }
     },
     {
@@ -748,13 +713,6 @@
       },
       "execution": {
         "taskSupport": "forbidden"
-      },
-      "_meta": {
-        "backend": "tomtom-orbis-maps",
-        "ui/resourceUri": "ui://tomtom-search/nearby-search/app.html",
-        "ui": {
-          "resourceUri": "ui://tomtom-search/nearby-search/app.html"
-        }
       }
     },
     {
@@ -783,13 +741,6 @@
       },
       "execution": {
         "taskSupport": "forbidden"
-      },
-      "_meta": {
-        "backend": "tomtom-orbis-maps",
-        "ui/resourceUri": "ui://tomtom-search/poi-categories/app.html",
-        "ui": {
-          "resourceUri": "ui://tomtom-search/poi-categories/app.html"
-        }
       }
     },
     {
@@ -895,13 +846,6 @@
       },
       "execution": {
         "taskSupport": "forbidden"
-      },
-      "_meta": {
-        "backend": "tomtom-orbis-maps",
-        "ui/resourceUri": "ui://tomtom-search/area-search/app.html",
-        "ui": {
-          "resourceUri": "ui://tomtom-search/area-search/app.html"
-        }
       }
     },
     {
@@ -992,13 +936,6 @@
       },
       "execution": {
         "taskSupport": "forbidden"
-      },
-      "_meta": {
-        "backend": "tomtom-orbis-maps",
-        "ui/resourceUri": "ui://tomtom-search/ev-search/app.html",
-        "ui": {
-          "resourceUri": "ui://tomtom-search/ev-search/app.html"
-        }
       }
     },
     {
@@ -1091,13 +1028,6 @@
       },
       "execution": {
         "taskSupport": "forbidden"
-      },
-      "_meta": {
-        "backend": "tomtom-orbis-maps",
-        "ui/resourceUri": "ui://tomtom-search/search-along-route/app.html",
-        "ui": {
-          "resourceUri": "ui://tomtom-search/search-along-route/app.html"
-        }
       }
     },
     {
@@ -1340,13 +1270,6 @@
       },
       "execution": {
         "taskSupport": "forbidden"
-      },
-      "_meta": {
-        "backend": "tomtom-orbis-maps",
-        "ui/resourceUri": "ui://tomtom-routing/route-planner/app.html",
-        "ui": {
-          "resourceUri": "ui://tomtom-routing/route-planner/app.html"
-        }
       }
     },
     {
@@ -1568,13 +1491,6 @@
       },
       "execution": {
         "taskSupport": "forbidden"
-      },
-      "_meta": {
-        "backend": "tomtom-orbis-maps",
-        "ui/resourceUri": "ui://tomtom-routing/reachable-range/app.html",
-        "ui": {
-          "resourceUri": "ui://tomtom-routing/reachable-range/app.html"
-        }
       }
     },
     {
@@ -1741,13 +1657,6 @@
       },
       "execution": {
         "taskSupport": "forbidden"
-      },
-      "_meta": {
-        "backend": "tomtom-orbis-maps",
-        "ui/resourceUri": "ui://tomtom-routing/ev-routing/app.html",
-        "ui": {
-          "resourceUri": "ui://tomtom-routing/ev-routing/app.html"
-        }
       }
     },
     {
@@ -1808,13 +1717,6 @@
       },
       "execution": {
         "taskSupport": "forbidden"
-      },
-      "_meta": {
-        "backend": "tomtom-orbis-maps",
-        "ui/resourceUri": "ui://tomtom-traffic/incidents/app.html",
-        "ui": {
-          "resourceUri": "ui://tomtom-traffic/incidents/app.html"
-        }
       }
     },
     {
@@ -2212,13 +2114,6 @@
       },
       "execution": {
         "taskSupport": "forbidden"
-      },
-      "_meta": {
-        "backend": "tomtom-orbis-maps",
-        "ui/resourceUri": "ui://tomtom-map/dynamic-map/app.html",
-        "ui": {
-          "resourceUri": "ui://tomtom-map/dynamic-map/app.html"
-        }
       }
     },
     {
@@ -2355,18 +2250,11 @@
       },
       "execution": {
         "taskSupport": "forbidden"
-      },
-      "_meta": {
-        "backend": "tomtom-orbis-maps",
-        "ui/resourceUri": "ui://tomtom-data-viz/byod/app.html",
-        "ui": {
-          "resourceUri": "ui://tomtom-data-viz/byod/app.html"
-        }
       }
     },
     {
       "name": "render_live_map",
-      "description": "Render a TomTom map for the user. Returns an inline map image PLUS a link to a live, interactive map (pan, zoom, live traffic overlay). Use this AFTER gathering coordinates from geocode/search/routing/traffic/EV tools to visualise places, routes, traffic or EV chargers. Pass markers for places, a route (origin+destination) for directions, and set traffic=true to show live traffic. Always prefer this tool to show results on a map.",
+      "description": "Render a TomTom map for the user. Returns an inline map image PLUS a link to a live, interactive map (pan, zoom, live traffic overlay). Use this AFTER gathering coordinates from geocode/search/routing/traffic/EV tools to visualise places, routes, traffic or EV chargers. Pass markers for places, a route (origin+destination) for directions, and set traffic=true to show live traffic. Pass overlays to add live data layers (heatmap + clusters) to the interactive map: 'earthquakes' (global USGS, last 30 days), 'uk-crime' (Police.uk street crime near the map centre), 'uk-floods' (Environment Agency warnings), 'uk-bikes' (London cycle hire), 'uk-tube' (live London Underground line status, lines drawn in their colours with delays highlighted). Set animate=true to return an animated map (a looping GIF that flies/zooms in to the location) for 'animate', 'fly to', 'zoom into' or cinematic requests. Always prefer this tool to show results on a map.",
       "annotations": {
         "title": "Render Live Map",
         "readOnlyHint": true,
@@ -2517,6 +2405,32 @@
             "type": "boolean",
             "description": "Overlay live traffic. DEFAULT false."
           },
+          "animate": {
+            "type": "boolean",
+            "description": "When true, return an ANIMATED map (a looping GIF that flies/zooms in to the location) instead of a still image. Use for 'animate', 'fly to', 'zoom into' or cinematic requests. DEFAULT false."
+          },
+          "animationEffect": {
+            "type": "string",
+            "enum": [
+              "zoom-in",
+              "zoom-out"
+            ],
+            "description": "Animation style when animate=true. DEFAULT zoom-in."
+          },
+          "overlays": {
+            "type": "array",
+            "description": "Live data layers to add to the interactive map (heatmap + clustered markers). Allowed: 'earthquakes' (global USGS M2.5+, last 30 days), 'uk-crime' (Police.uk street crime near the map centre), 'uk-floods' (Environment Agency flood warnings), 'uk-bikes' (London cycle hire docks), 'uk-tube' (live London Underground line status). For 'uk-crime' set center to a UK location; for 'uk-tube'/'uk-bikes' centre on London.",
+            "items": {
+              "type": "string",
+              "enum": [
+                "earthquakes",
+                "uk-crime",
+                "uk-floods",
+                "uk-bikes",
+                "uk-tube"
+              ]
+            }
+          },
           "width": {
             "type": "number",
             "minimum": 100,
@@ -2530,6 +2444,40 @@
             "description": "Image height in px. DEFAULT 700."
           }
         }
+      }
+    },
+    {
+      "name": "tomtom_map_image",
+      "description": "Internal: returns a rendered TomTom map image as a data URL for the live-map widget.",
+      "annotations": {
+        "title": "Map image",
+        "readOnlyHint": true
+      },
+      "_meta": {
+        "ui": {
+          "visibility": [
+            "app"
+          ]
+        },
+        "openai/visibility": [
+          "app"
+        ]
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "argsB64": {
+            "type": "string",
+            "description": "Base64-encoded JSON of the map tool arguments."
+          },
+          "tool": {
+            "type": "string",
+            "description": "Map tool name. DEFAULT tomtom-dynamic-map."
+          }
+        },
+        "required": [
+          "argsB64"
+        ]
       }
     }
   ]

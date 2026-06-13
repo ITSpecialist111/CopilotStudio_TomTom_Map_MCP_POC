@@ -12,6 +12,7 @@
  */
 
 import { callMcpRpc, JsonRpcResponse } from "./mcpClient";
+import { getAppSdkScript } from "./appSdk";
 import Jimp from "jimp";
 
 /** MCP protocol version advertised when a client omits one during initialize. */
@@ -40,6 +41,14 @@ const UI_RESOURCE_STATIC = `${UI_RESOURCE_BASE}.html`;
 const UI_MIME = "text/html;profile=mcp-app";
 
 /**
+ * Live data overlays the interactive map (Static Web App) can render on top of
+ * the base map: a heatmap of hotspots + clustered markers (points) or
+ * severity-coloured areas (polygons). Fetched client-side from public,
+ * CORS-enabled feeds. Passed to the SWA via the `overlay` query parameter.
+ */
+const OVERLAY_KEYS = new Set(["earthquakes", "uk-crime", "uk-floods", "uk-bikes", "uk-tube"]);
+
+/**
  * In-memory store of the most recent map per MCP session. Cowork fetches the
  * widget HTML via `resources/read` for the static `ui://` URI (it does not echo
  * the per-call token URI), but it re-attaches the same `Mcp-Session-Id`. We use
@@ -51,6 +60,10 @@ interface StoredMap {
   args: Record<string, unknown>;
   /** Pre-rendered map image as a `data:` URL (baked at tools/call time). */
   dataUrl?: string | null;
+  /** Fully-built interactive map (SWA) URL, incl. overlays/traffic/center. */
+  liveUrl?: string | null;
+  /** Map title/caption. */
+  title?: string | null;
   ts: number;
 }
 const SESSION_MAPS = new Map<string, StoredMap>();
@@ -61,14 +74,23 @@ function rememberMap(
   sessionId: string | undefined,
   tool: string,
   args: Record<string, unknown>,
-  dataUrl?: string | null
+  dataUrl?: string | null,
+  liveUrl?: string | null,
+  title?: string | null
 ): void {
   if (!sessionId) return;
   if (SESSION_MAPS.size >= SESSION_MAX) {
     const oldest = SESSION_MAPS.keys().next().value;
     if (oldest) SESSION_MAPS.delete(oldest);
   }
-  SESSION_MAPS.set(sessionId, { tool, args, dataUrl: dataUrl ?? null, ts: Date.now() });
+  SESSION_MAPS.set(sessionId, {
+    tool,
+    args,
+    dataUrl: dataUrl ?? null,
+    liveUrl: liveUrl ?? null,
+    title: title ?? null,
+    ts: Date.now(),
+  });
 }
 
 function recallMap(sessionId: string | undefined): StoredMap | null {
@@ -138,6 +160,12 @@ interface LiveMapArgs {
   traffic?: boolean;
   width?: number;
   height?: number;
+  /** When true, render an animated GIF fly-in instead of a still image. */
+  animate?: boolean;
+  /** Animation style: "zoom-in" (default) or "zoom-out". */
+  animationEffect?: string;
+  /** Live data overlays to show on the interactive map (e.g. "earthquakes"). */
+  overlays?: string[];
 }
 
 /** A content block in an MCP tool result. */
@@ -159,7 +187,13 @@ const RENDER_LIVE_MAP_TOOL = {
     "interactive map (pan, zoom, live traffic overlay). Use this AFTER gathering coordinates " +
     "from geocode/search/routing/traffic/EV tools to visualise places, routes, traffic or EV " +
     "chargers. Pass markers for places, a route (origin+destination) for directions, and set " +
-    "traffic=true to show live traffic. Always prefer this tool to show results on a map.",
+    "traffic=true to show live traffic. Pass overlays to add live data layers (heatmap + " +
+    "clusters) to the interactive map: 'earthquakes' (global USGS, last 30 days), 'uk-crime' " +
+    "(Police.uk street crime near the map centre), 'uk-floods' (Environment Agency warnings), " +
+    "'uk-bikes' (London cycle hire), 'uk-tube' (live London Underground line status, lines " +
+    "drawn in their colours with delays highlighted). Set animate=true to return an animated " +
+    "map (a looping GIF that flies/zooms in to the location) for 'animate', 'fly to', 'zoom " +
+    "into' or cinematic requests. Always prefer this tool to show results on a map.",
   annotations: {
     title: "Render Live Map",
     readOnlyHint: true,
@@ -258,6 +292,31 @@ const RENDER_LIVE_MAP_TOOL = {
       traffic: {
         type: "boolean",
         description: "Overlay live traffic. DEFAULT false.",
+      },
+      animate: {
+        type: "boolean",
+        description:
+          "When true, return an ANIMATED map (a looping GIF that flies/zooms in to the " +
+          "location) instead of a still image. Use for 'animate', 'fly to', 'zoom into' or " +
+          "cinematic requests. DEFAULT false.",
+      },
+      animationEffect: {
+        type: "string",
+        enum: ["zoom-in", "zoom-out"],
+        description: "Animation style when animate=true. DEFAULT zoom-in.",
+      },
+      overlays: {
+        type: "array",
+        description:
+          "Live data layers to add to the interactive map (heatmap + clustered markers). " +
+          "Allowed: 'earthquakes' (global USGS M2.5+, last 30 days), 'uk-crime' (Police.uk " +
+          "street crime near the map centre), 'uk-floods' (Environment Agency flood warnings), " +
+          "'uk-bikes' (London cycle hire docks), 'uk-tube' (live London Underground line status). " +
+          "For 'uk-crime' set center to a UK location; for 'uk-tube'/'uk-bikes' centre on London.",
+        items: {
+          type: "string",
+          enum: ["earthquakes", "uk-crime", "uk-floods", "uk-bikes", "uk-tube"],
+        },
       },
       width: {
         type: "number",
@@ -421,6 +480,21 @@ function buildImageUrl(
   )}&args=${encodeURIComponent(b64)}`;
 }
 
+/** Builds the animated (GIF fly-in) image URL served by `GET /api/get-map-animation`. */
+function buildAnimationUrl(
+  ctx: GatewayContext,
+  tool: string,
+  toolArgs: Record<string, unknown>,
+  effect?: string
+): string {
+  const base = ctx.publicBaseUrl.replace(/\/+$/, "");
+  const b64 = base64Json(toolArgs);
+  const eff = effect === "zoom-out" ? "zoom-out" : "zoom-in";
+  return `${base}/api/get-map-animation?tool=${encodeURIComponent(
+    tool
+  )}&args=${encodeURIComponent(b64)}&effect=${eff}`;
+}
+
 /** Builds the live, interactive map deep link into the Static Web App. */
 function buildInteractiveUrl(
   ctx: GatewayContext,
@@ -461,6 +535,12 @@ function buildInteractiveUrl(
 
   if (a.traffic) params.set("traffic", "true");
   if (a.title) params.set("title", a.title);
+  if (Array.isArray(a.overlays) && a.overlays.length > 0) {
+    const keys = a.overlays
+      .map((o) => String(o).trim().toLowerCase())
+      .filter((o) => OVERLAY_KEYS.has(o));
+    if (keys.length > 0) params.set("overlay", Array.from(new Set(keys)).join(","));
+  }
   if (ctx.mapClientKey) params.set("apiKey", ctx.mapClientKey);
 
   return `${base}/?${params.toString()}`;
@@ -614,52 +694,107 @@ async function fetchMapDataUrl(
 
 /**
  * Builds the self-contained MCP App widget HTML (SEP-1865) Cowork renders in a
- * sandboxed iframe. The widget performs the SEP-1865 handshake (ui/initialize ->
- * ui/notifications/initialized) and reports its size so the host dismisses the
- * loading skeleton. Its PRIMARY content is the full interactive map (the SWA /
- * MapLibre app) embedded as a nested iframe: Cowork honours `frameDomains` on the
- * UI resource's `_meta.ui.csp`, and the SWA is its own origin, so it loads its own
- * tiles and gives real inline pan / zoom / live-traffic. The pre-rendered `data:`
- * image sits behind it as an instant poster + fallback. The TomTom key stays
- * server-side (the SWA deep link uses the referrer-restricted client key).
+ * sandboxed iframe. It inlines the official `@modelcontextprotocol/ext-apps`
+ * SDK (export stripped to `window.App`) and uses `App.connect()` for the
+ * handshake — byte-compatible with the host's `AppBridge`, which is what makes
+ * the widget actually mount (a hand-rolled handshake is silently rejected and
+ * times out). Its content is the full interactive map (the SWA / MapLibre app)
+ * embedded as a nested iframe: Cowork honours `frameDomains` on the UI
+ * resource's `_meta.ui.csp`, and the SWA is its own origin, so it loads its own
+ * tiles and gives real inline pan / zoom / live-traffic / data overlays. The
+ * TomTom key stays server-side (the SWA deep link uses the referrer-restricted
+ * client key).
  */
 function buildWidgetHtml(
   ctx: GatewayContext,
-  baked: { tool: string; args: Record<string, unknown>; dataUrl?: string | null } | null
+  baked: {
+    tool: string;
+    args: Record<string, unknown>;
+    dataUrl?: string | null;
+    liveUrl?: string | null;
+    title?: string | null;
+  } | null
 ): string {
   let dataUrl: string | null = null;
   let liveUrl: string | null = null;
-  let imageUrl: string | null = null;
   let title = "Map";
 
   if (baked) {
     const tool = baked.tool || "tomtom-dynamic-map";
-    imageUrl = buildImageUrl(ctx, tool, baked.args);
-    if (tool === "tomtom-dynamic-map") {
+    if (typeof baked.liveUrl === "string" && baked.liveUrl) {
+      liveUrl = baked.liveUrl;
+    } else if (tool === "tomtom-dynamic-map") {
       liveUrl = buildInteractiveUrl(ctx, dynamicArgsToLive(baked.args)) ?? null;
     }
-    if (typeof baked.args.title === "string") title = baked.args.title as string;
+    title =
+      baked.title ||
+      (typeof baked.args.title === "string" ? (baked.args.title as string) : "Map");
     dataUrl = baked.dataUrl ?? null;
   }
 
-  const init = JSON.stringify({
-    dataUrl,
-    imageUrl,
-    liveUrl,
-    title,
-    mapArgs: baked ? baked.args : null,
-  }).replace(/</g, "\\u003c");
-  const mapImageToolName = JSON.stringify(MAP_IMAGE_TOOL);
-
-  // PRIMARY content = the full interactive map (SWA / MapLibre) embedded as a
-  // nested iframe. Cowork honours `frameDomains` (set on the UI resource's
-  // `_meta.ui.csp`), and the SWA is its own origin, so it loads its own tiles and
-  // is fully pannable / zoomable INLINE. The pre-rendered `data:` image sits
-  // BEHIND it as an instant poster (no blank flash) and as a fallback if the
-  // iframe is ever unavailable — so the map is visible with zero script reliance.
   const esc = (s: string) =>
     s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
   const titleHtml = esc(title);
+  const init = JSON.stringify({ title, liveUrl }).replace(/</g, "\\u003c");
+  const sdk = getAppSdkScript();
+
+  // ---- DIAGNOSTIC MODE (WIDGET_DIAG=1) -------------------------------------
+  // A minimal widget that does the official-SDK handshake and renders a map
+  // image fetched via a widget `tools/call` (the Cowork-sanctioned network
+  // path) — with NO nested cross-origin iframe. This isolates the cause of the
+  // "didn't respond in time" timeout: if THIS mounts, the nested SWA iframe was
+  // the blocker and the production widget should use the image+tools/call
+  // pattern instead of an embedded iframe.
+  if (process.env.WIDGET_DIAG === "1") {
+    const argsB64 = baked ? base64Json(baked.args) : "";
+    const diagInit = JSON.stringify({ argsB64, title }).replace(/</g, "\\u003c");
+    return `<!doctype html>
+<html lang="en"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1"/>
+<style>
+  html,body{margin:0;padding:0;font-family:'Segoe UI',system-ui,sans-serif;}
+  .box{padding:12px;border-radius:10px;background:#0a8a3f;color:#fff;font-weight:600;font-size:14px;}
+  .s{font-size:12px;font-weight:400;margin-top:6px;opacity:.95;white-space:pre-wrap;}
+  img.m{display:block;width:100%;border-radius:10px;margin-top:8px;background:#eef1f5;}
+</style></head>
+<body>
+<div class="wrap" style="padding:8px">
+  <div class="box">TomTom widget diagnostic
+    <div class="s" id="s">booting…</div>
+  </div>
+  <img class="m" id="m" alt="map" style="display:none"/>
+</div>
+<script>${sdk}</script>
+<script>
+(function(){
+  var INIT = ${diagInit};
+  var s = document.getElementById('s');
+  var m = document.getElementById('m');
+  function say(t){ try{ s.textContent = t; }catch(e){} }
+  var App = window.App;
+  if(!App){ say('ERROR: window.App not defined (SDK did not load)'); return; }
+  say('SDK loaded. Connecting…');
+  var app = new App({ name:"tomtom-diag", version:"1.0.0" }, {}, { autoResize:true });
+  app.onerror = function(e){ say('app error: ' + (e && e.message ? e.message : e)); };
+  app.connect().then(function(){
+    say('CONNECTED ✓ — fetching map image via tools/call…');
+    if(!INIT.argsB64){ say('CONNECTED ✓ (no map args to fetch)'); return; }
+    app.callServerTool({ name:"tomtom_map_image", arguments:{ argsB64: INIT.argsB64, tool:"tomtom-dynamic-map" } })
+      .then(function(res){
+        var du=null; try{ du = res && res.structuredContent && res.structuredContent.dataUrl; }catch(e){}
+        if(!du){ try{ var c=res&&res.content; if(c&&c[0]&&typeof c[0].text==='string'&&c[0].text.indexOf('data:image')===0) du=c[0].text; }catch(e){} }
+        if(du){ m.src=du; m.style.display='block'; say('CONNECTED ✓ + image via tools/call ✓'); }
+        else { say('CONNECTED ✓ but tools/call returned no image'); }
+      }, function(err){ say('CONNECTED ✓ but tools/call FAILED: ' + (err&&err.message?err.message:err)); });
+  }, function(err){ say('connect() FAILED: ' + (err && err.message ? err.message : err)); });
+})();
+</script>
+</body></html>`;
+  }
+
+  // The interactive map (SWA / MapLibre) is embedded as a nested iframe. Cowork
+  // honours `frameDomains` (set on the UI resource's `_meta.ui.csp`), and the SWA
+  // is its own origin, so it loads its own tiles and is fully pannable / zoomable
+  // INLINE. An optional pre-rendered `data:` image sits behind it as a poster.
   const posterHtml = dataUrl
     ? `<img class="poster" id="poster" alt="${titleHtml}" src="${dataUrl}" />`
     : "";
@@ -668,12 +803,10 @@ function buildWidgetHtml(
     slotInner =
       `<div class="frame">` +
       posterHtml +
-      `<iframe class="live" id="live" src="${esc(liveUrl)}" loading="eager" title="${titleHtml}"></iframe>` +
+      `<iframe class="live" id="live" src="${esc(liveUrl)}" loading="eager" title="${titleHtml}" allow="fullscreen; geolocation"></iframe>` +
       `</div>`;
   } else if (dataUrl) {
     slotInner = `<div class="frame">${posterHtml}</div>`;
-  } else if (imageUrl) {
-    slotInner = `<div class="frame"><iframe class="live" src="${esc(imageUrl)}" loading="eager" scrolling="no"></iframe></div>`;
   } else {
     slotInner = `<div class="msg">Map unavailable.</div>`;
   }
@@ -719,73 +852,14 @@ function buildWidgetHtml(
   <div id="slot">${slotInner}</div>
   <div class="bar"><button class="go" id="go"${goStyle}>Expand to full screen</button></div>
 </div>
+<script>${sdk}</script>
 <script>
 (function(){
   var INIT = ${init};
-  var MAP_IMAGE_TOOL = ${mapImageToolName};
-  var PROTOCOL = "2026-01-26";
-  var liveUrl = INIT.liveUrl || null;
-  var slot = document.getElementById('slot');
-  var go = document.getElementById('go');
   var tEl = document.getElementById('t');
-
-  // ---- JSON-RPC 2.0 over postMessage (SEP-1865 iframe transport) ----
-  var nextId = 1, pending = {};
-  function post(m){ try { window.parent.postMessage(m, '*'); } catch(e){} }
-  function request(method, params){
-    var id = nextId++;
-    return new Promise(function(resolve, reject){
-      pending[id] = [resolve, reject];
-      post({ jsonrpc:"2.0", id:id, method:method, params:params||{} });
-      setTimeout(function(){ if(pending[id]){ delete pending[id]; reject(new Error('timeout')); } }, 5000);
-    });
-  }
-  function notify(method, params){ post({ jsonrpc:"2.0", method:method, params:params||{} }); }
-
-  // ---- SEP-1865 lifecycle state ----
-  // The host shows a loading skeleton until the View completes the
-  // ui/initialize -> ui/notifications/initialized handshake. Per spec the View
-  // MUST send the handshake first; size notifications sent BEFORE 'initialized'
-  // are ignored. The map (SWA iframe + poster image) is baked into the HTML, so
-  // the visual never depends on this script — the handshake just clears the
-  // skeleton, enables resizing, and wires the fullscreen toggle.
-  var initialized = false;
-  var handshakeDone = false;
-  var curMode = "inline";
-  var hostModes = ["inline"];
-
-  // ---- size reporting (only AFTER the handshake completes) ----
-  var lastH = 0, lastW = 0;
-  function reportSize(){
-    if(!initialized) return;
-    var h = Math.ceil(Math.max(document.body ? document.body.scrollHeight : 0, document.documentElement.scrollHeight || 0));
-    var w = Math.ceil(Math.max(document.body ? document.body.scrollWidth : 0, document.documentElement.scrollWidth || 0));
-    if(h > 0 && (Math.abs(h - lastH) > 1 || Math.abs(w - lastW) > 1)){
-      lastH = h; lastW = w;
-      notify("ui/notifications/size-changed", { width: w, height: h });
-    }
-  }
-  function startSizing(){
-    initialized = true;
-    try {
-      if(window.ResizeObserver){
-        var ro = new ResizeObserver(reportSize);
-        ro.observe(document.documentElement);
-        if(document.body) ro.observe(document.body);
-      }
-    } catch(e){}
-    window.addEventListener('resize', reportSize);
-    var live = document.getElementById('live');
-    if(live){ live.addEventListener('load', reportSize); }
-    reportSize();
-  }
-
-  function setTitle(t){ if(t){ tEl.textContent = t; document.title = t; } }
-  function setLive(u){ if(u){ liveUrl = u; } if(liveUrl){ go.style.display='inline-block'; } }
-  setTitle(INIT.title);
-  setLive(INIT.liveUrl);
-
-  // ---- theming + container sizing from host context ----
+  var go = document.getElementById('go');
+  var curMode = 'inline';
+  function setGoLabel(){ if(go){ go.textContent = (curMode === 'fullscreen') ? 'Exit full screen' : 'Expand to full screen'; } }
   function applyTheme(ctx){
     try {
       if(ctx && ctx.theme){ document.documentElement.style.colorScheme = ctx.theme; }
@@ -793,103 +867,52 @@ function buildWidgetHtml(
       if(v){ for(var k in v){ if(v[k] != null){ document.documentElement.style.setProperty(k, v[k]); } } }
     } catch(e){}
   }
-  function applyDimensions(ctx){
+
+  // The map is the embedded SWA iframe; it renders regardless of the handshake.
+  // The official ext-apps App SDK (inlined above as window.App) drives the
+  // SEP-1865 lifecycle so Cowork mounts us and clears the loading skeleton.
+  var App = window.App;
+  if(!App){ return; }
+
+  var app = new App(
+    { name: "tomtom-live-map", version: "1.0.0" },
+    { availableDisplayModes: ["inline", "fullscreen"] },
+    { autoResize: true }
+  );
+
+  // Register handlers BEFORE connect() so no early notifications are missed.
+  app.ontoolresult = function(res){
     try {
-      var cd = ctx && ctx.containerDimensions; if(!cd) return;
-      var de = document.documentElement;
-      if('height' in cd){ de.style.height = '100vh'; }
-      else if(cd.maxHeight){ de.style.maxHeight = cd.maxHeight + 'px'; }
-    } catch(e){}
-  }
-
-  // ---- fullscreen toggle (ui/open-link is NOT supported in Cowork; the
-  // embedded SWA iframe is the interactive map, and fullscreen gives it room) ----
-  function setGoLabel(){ go.textContent = (curMode === 'fullscreen') ? 'Exit full screen' : 'Expand to full screen'; }
-  go.addEventListener('click', function(){
-    var want = (curMode === 'fullscreen') ? 'inline' : 'fullscreen';
-    request("ui/request-display-mode", { mode: want }).then(function(r){
-      if(r && r.mode){ curMode = r.mode; setGoLabel(); reportSize(); }
-    }).catch(function(){});
-  });
-
-  // ---- host -> view messages ----
-  function respond(rid, result){ post({ jsonrpc:"2.0", id:rid, result: result||{} }); }
-  function initResult(){
-    return { protocolVersion: PROTOCOL,
-      appCapabilities: { availableDisplayModes: ["inline", "fullscreen"] },
-      appInfo: { name: "tomtom-live-map", version: "1.0.0" } };
-  }
-  window.addEventListener('message', function(ev){
-    var d = ev.data;
-    if(!d || d.jsonrpc !== "2.0") return;
-
-    // A response to one of OUR outgoing requests (resolve the pending promise).
-    if(d.id != null && pending[d.id] && (d.result !== undefined || d.error !== undefined)){
-      var p = pending[d.id]; delete pending[d.id];
-      if(d.error){ p[1](new Error((d.error && d.error.message) || 'error')); } else { p[0](d.result); }
-      return;
-    }
-
-    var m = d.method;
-    if(!m) return;
-
-    // Host -> View REQUESTS (have an id; the host waits for a response — failing
-    // to answer is what triggers "widget didn't respond in time").
-    if(d.id != null){
-      if(m === 'ping'){ respond(d.id, {}); return; }
-      if(m === 'ui/initialize'){
-        // Some hosts INITIATE the handshake toward the View. Answer with our
-        // capabilities, then complete our side.
-        respond(d.id, initResult());
-        finishHandshake(d.params || null);
-        return;
+      var sc = res && res.structuredContent;
+      if(sc && sc.title && tEl){ tEl.textContent = sc.title; }
+      if(sc && sc.interactiveUrl){
+        var f = document.getElementById('live');
+        if(f && f.getAttribute('src') !== sc.interactiveUrl){ f.setAttribute('src', sc.interactiveUrl); }
       }
-      if(m === 'ui/resource-teardown'){ respond(d.id, {}); return; }
-      // Unknown request: acknowledge so the host never considers us unresponsive.
-      respond(d.id, {});
-      return;
-    }
+    } catch(e){}
+  };
+  app.ontoolinput = function(){};
+  app.onhostcontextchanged = function(ctx){
+    try { if(ctx && ctx.displayMode){ curMode = ctx.displayMode; setGoLabel(); } applyTheme(ctx); } catch(e){}
+  };
+  app.onerror = function(e){ try { console.error('mcp-app', e); } catch(_){ } };
 
-    // Host -> View NOTIFICATIONS (no id).
-    if(m === 'ui/notifications/host-context-changed'){
-      applyTheme(d.params); applyDimensions(d.params);
-      if(d.params && d.params.displayMode){ curMode = d.params.displayMode; setGoLabel(); }
-      reportSize();
-      return;
-    }
-    if(m === 'ui/notifications/tool-result' || m === 'ui/notifications/tool-input'){
-      // The map is already baked in; just keep the title/link in sync + remeasure.
+  if(go){
+    go.addEventListener('click', function(){
+      var want = (curMode === 'fullscreen') ? 'inline' : 'fullscreen';
       try {
-        var sc = d.params && d.params.structuredContent;
-        if(sc && sc.title) setTitle(sc.title);
-        if(sc && sc.interactiveUrl) setLive(sc.interactiveUrl);
+        var p = app.requestDisplayMode ? app.requestDisplayMode({ mode: want }) : null;
+        if(p && p.then){ p.then(function(r){ if(r && r.mode){ curMode = r.mode; setGoLabel(); } }, function(){}); }
       } catch(e){}
-      reportSize();
-      return;
-    }
-  });
-
-  // ---- handshake (idempotent): View-initiated ui/initialize -> initialized ----
-  // We also answer a host-INITIATED ui/initialize (above). Whichever fires first
-  // wins; finishHandshake is guarded so it runs exactly once.
-  function finishHandshake(res){
-    if(handshakeDone) return; handshakeDone = true;
-    try {
-      var ctx = (res && res.hostContext) ? res.hostContext : res;
-      if(ctx){
-        applyTheme(ctx); applyDimensions(ctx);
-        if(ctx.displayMode){ curMode = ctx.displayMode; setGoLabel(); }
-        if(ctx.availableDisplayModes){ hostModes = ctx.availableDisplayModes; }
-      }
-    } catch(e){}
-    notify("ui/notifications/initialized", {});
-    startSizing();
+    });
   }
-  request("ui/initialize", initResult()).then(finishHandshake, function(){ finishHandshake(null); });
 
-  // Fallback: if neither direction completes quickly, finish anyway so the
-  // skeleton clears and the baked map shows.
-  setTimeout(function(){ finishHandshake(null); }, 1200);
+  app.connect().then(function(){
+    try {
+      var ctx = app.getHostContext ? app.getHostContext() : null;
+      if(ctx){ if(ctx.displayMode){ curMode = ctx.displayMode; setGoLabel(); } applyTheme(ctx); }
+    } catch(e){}
+  }, function(e){ try { console.error('mcp-app connect failed', e); } catch(_){ } });
 })();
 </script>
 </body>
@@ -907,8 +930,19 @@ async function renderLiveMapResult(
 ): Promise<JsonRpcResponse> {
   const a = (rawArgs || {}) as LiveMapArgs;
   const dynamicArgs = buildDynamicMapArgs(a);
-  const imageUrl = buildImageUrl(ctx, "tomtom-dynamic-map", dynamicArgs);
+  const animate = a.animate === true;
+  if (animate) {
+    // Give the fly-in a focal centre + target zoom even if the caller omitted them.
+    const c = pickCenter(a);
+    if (c) {
+      dynamicArgs.center = { lat: c.lat, lon: c.lon };
+      dynamicArgs.zoom = clampInt(a.zoom, 0, 22, 14);
+    }
+  }
   const imageArgs = base64Json(dynamicArgs);
+  const imageUrl = animate
+    ? buildAnimationUrl(ctx, "tomtom-dynamic-map", dynamicArgs, a.animationEffect)
+    : buildImageUrl(ctx, "tomtom-dynamic-map", dynamicArgs);
   const liveUrl = buildInteractiveUrl(ctx, a) ?? null;
   const title = a.title ? String(a.title) : "Map";
   const widget = ctx.widgetEnabled === true;
@@ -928,31 +962,13 @@ async function renderLiveMapResult(
   };
 
   if (widget) {
-    // Pre-render a poster image and cache the map for THIS MCP session. Cowork
-    // mounts the widget via `resources/read` for the static `ui://` URI and
+    // Cache the fully-built interactive (SWA) URL + title for THIS MCP session.
+    // Cowork mounts the widget via `resources/read` for the static `ui://` URI and
     // re-attaches the same `Mcp-Session-Id`, so handleResourcesRead rebuilds the
-    // right widget (interactive SWA iframe + poster fallback) from this entry.
-    const center = pickCenter(a);
-    const zoom =
-      typeof a.zoom === "number"
-        ? clampInt(a.zoom, 1, 22, 14)
-        : a.route
-        ? 11
-        : a.markers && a.markers.length > 1
-        ? 12
-        : 15;
-    const widgetArgs: Record<string, unknown> = { ...dynamicArgs, width: 640, height: 400 };
-    if (center) {
-      widgetArgs.center = center;
-      widgetArgs.zoom = zoom;
-    }
-    let dataUrl: string | null = null;
-    try {
-      dataUrl = await fetchMapDataUrl(ctx, "tomtom-dynamic-map", widgetArgs);
-    } catch {
-      dataUrl = null;
-    }
-    rememberMap(ctx.sessionId, "tomtom-dynamic-map", widgetArgs, dataUrl);
+    // right widget (interactive SWA iframe, overlay-aware) from this entry. We do
+    // NOT pre-render a poster image here — the embedded SWA iframe IS the live
+    // map, so `resources/read` stays instant and the handshake isn't delayed.
+    rememberMap(ctx.sessionId, "tomtom-dynamic-map", dynamicArgs, null, liveUrl, title);
     result.content = [
       {
         type: "text",
@@ -1115,22 +1131,74 @@ async function handleToolsCall(
   return upstream;
 }
 
-/** True for the upstream `{ "_meta": { "show_ui": ... } }` marker text block. */
-function isShowUiMetaText(text?: string): boolean {
+/**
+ * True only for a *pure* upstream UI-marker block — a text block whose JSON is
+ * essentially just `{ "_meta": { "show_ui": ... } }` with no real payload.
+ *
+ * IMPORTANT: upstream tools (geocode, search, routing, EV, …) append a
+ * top-level `"_meta": { "show_ui": false }` sibling NEXT TO their real data
+ * (e.g. a GeoJSON FeatureCollection). A naive substring check would treat that
+ * whole data block as a marker and drop it, leaving `content: []`. So we parse
+ * the JSON and only flag blocks that carry nothing of substance beyond `_meta`.
+ */
+function isPureShowUiMarker(text?: string): boolean {
   if (typeof text !== "string") return false;
   const t = text.trim();
-  return t.startsWith("{") && t.includes('"_meta"') && t.includes("show_ui");
+  if (!t.startsWith("{") || !t.includes("_meta")) return false;
+  let obj: unknown;
+  try {
+    obj = JSON.parse(t);
+  } catch {
+    return false;
+  }
+  if (!obj || typeof obj !== "object") return false;
+  const keys = Object.keys(obj as Record<string, unknown>);
+  return keys.length > 0 && keys.every((k) => k === "_meta");
 }
 
-/** Removes upstream MCP App widget hints so Cowork won't mount a broken widget. */
+/**
+ * If a text block is JSON carrying a top-level `_meta` sibling alongside real
+ * data, removes just the `_meta` (a widget hint the agent shouldn't see) and
+ * returns the re-serialized text. Returns null when there is nothing to change.
+ */
+function stripTopLevelMetaFromText(text?: string): string | null {
+  if (typeof text !== "string") return null;
+  const t = text.trim();
+  if (!t.startsWith("{") || !t.includes("_meta")) return null;
+  let obj: Record<string, unknown>;
+  try {
+    obj = JSON.parse(t) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+  if (!obj || typeof obj !== "object" || !("_meta" in obj)) return null;
+  delete obj._meta;
+  return JSON.stringify(obj, null, 2);
+}
+
+/**
+ * Removes upstream MCP App widget hints so Cowork won't mount a broken widget,
+ * WITHOUT discarding real tool output. Pure `_meta` marker blocks are dropped;
+ * data blocks that merely carry a top-level `_meta` sibling keep their payload
+ * with just the `_meta` stripped.
+ */
 function stripUpstreamWidget(result: Record<string, unknown>): void {
   if (result._meta) delete result._meta;
   const content = result.content;
-  if (Array.isArray(content)) {
-    result.content = (content as McpBlock[]).filter(
-      (b) => !(b && b.type === "text" && isShowUiMetaText(b.text))
-    );
+  if (!Array.isArray(content)) return;
+  const out: McpBlock[] = [];
+  for (const b of content as McpBlock[]) {
+    if (b && b.type === "text") {
+      if (isPureShowUiMarker(b.text)) continue; // drop pure UI-marker blocks
+      const cleaned = stripTopLevelMetaFromText(b.text);
+      if (cleaned !== null) {
+        out.push({ ...b, text: cleaned });
+        continue;
+      }
+    }
+    out.push(b);
   }
+  result.content = out;
 }
 
 function transformImageResult(
@@ -1167,7 +1235,7 @@ function transformImageResult(
   // Keep the upstream text (minus the show_ui marker); drop the bulky base64 image.
   const textBlocks = Array.isArray(result.content)
     ? (result.content as McpBlock[]).filter(
-        (b) => b && b.type === "text" && !isShowUiMetaText(b.text)
+        (b) => b && b.type === "text" && !isPureShowUiMarker(b.text)
       )
     : [];
   result.content = textBlocks.length
@@ -1253,7 +1321,15 @@ async function handleResourcesRead(
   if (uri === UI_RESOURCE_STATIC || uri.startsWith(`${UI_RESOURCE_BASE}/`)) {
     // Prefer the per-call token (if Cowork echoes it); otherwise fall back to the
     // most recent map for this MCP session (the static-URI mount path).
-    let baked: { tool: string; args: Record<string, unknown>; dataUrl?: string | null } | null = null;
+    let baked:
+      | {
+          tool: string;
+          args: Record<string, unknown>;
+          dataUrl?: string | null;
+          liveUrl?: string | null;
+          title?: string | null;
+        }
+      | null = null;
     const match = uri.match(/\/live-map\/(.+?)\.html$/);
     if (match) {
       const decoded = decodeMapToken(match[1]);
@@ -1261,12 +1337,19 @@ async function handleResourcesRead(
     }
     if (!baked) {
       const recalled = recallMap(ctx.sessionId);
-      if (recalled) baked = { tool: recalled.tool, args: recalled.args, dataUrl: recalled.dataUrl };
+      if (recalled)
+        baked = {
+          tool: recalled.tool,
+          args: recalled.args,
+          dataUrl: recalled.dataUrl,
+          liveUrl: recalled.liveUrl,
+          title: recalled.title,
+        };
     }
     console.log(
       `mcpGateway: live-map widget session=${ctx.sessionId ?? "-"} baked=${
         baked ? "yes" : "no"
-      } hasImage=${baked && baked.dataUrl ? "yes" : "no"}`
+      } liveUrl=${baked && baked.liveUrl ? "yes" : "no"}`
     );
     const html = buildWidgetHtml(ctx, baked);
     const domains = frameDomainsFor(ctx);
