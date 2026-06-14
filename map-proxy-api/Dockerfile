@@ -22,6 +22,9 @@ RUN npm ci --omit=dev && npm cache clean --force
 # Copy compiled output from build stage
 COPY --from=build /app/dist ./dist
 
+# SWA HTML inlined into widget responses (read at runtime by interactiveMapHtml.ts)
+COPY interactive-map-app/ ./interactive-map-app/
+
 EXPOSE 3001
 
 CMD ["node", "dist/server.js"]

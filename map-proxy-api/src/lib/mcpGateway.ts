@@ -13,6 +13,7 @@
 
 import { callMcpRpc, JsonRpcResponse } from "./mcpClient";
 import { getAppSdkScript } from "./appSdk";
+import { getInteractiveMapAssets } from "./interactiveMapHtml";
 import Jimp from "jimp";
 
 /** MCP protocol version advertised when a client omits one during initialize. */
@@ -29,6 +30,15 @@ export const RENDER_LIVE_MAP = "render_live_map";
 
 /** App-only tool the widget calls back to pull a rendered map image (base64). */
 export const MAP_IMAGE_TOOL = "tomtom_map_image";
+
+/**
+ * Federated-connector tools. Microsoft 365 Copilot custom federated connectors
+ * enable ONLY tools that perform `search` and `fetch` operations, and each must
+ * carry the `readOnlyHint` annotation. These two wrap TomTom search so Copilot
+ * (Researcher / Copilot Chat / Excel) can query live location data natively.
+ */
+export const SEARCH_TOOL = "search";
+export const FETCH_TOOL = "fetch";
 
 /**
  * MCP Apps (SEP-1865) UI resource for the live-map widget. Cowork fetches this
@@ -64,6 +74,8 @@ interface StoredMap {
   liveUrl?: string | null;
   /** Map title/caption. */
   title?: string | null;
+  /** Pre-rendered ASCILINE PIXEL Mode HTML (half-block colored grid). */
+  pixelHtml?: string | null;
   ts: number;
 }
 const SESSION_MAPS = new Map<string, StoredMap>();
@@ -76,7 +88,8 @@ function rememberMap(
   args: Record<string, unknown>,
   dataUrl?: string | null,
   liveUrl?: string | null,
-  title?: string | null
+  title?: string | null,
+  pixelHtml?: string | null
 ): void {
   if (!sessionId) return;
   if (SESSION_MAPS.size >= SESSION_MAX) {
@@ -89,6 +102,7 @@ function rememberMap(
     dataUrl: dataUrl ?? null,
     liveUrl: liveUrl ?? null,
     title: title ?? null,
+    pixelHtml: pixelHtml ?? null,
     ts: Date.now(),
   });
 }
@@ -166,6 +180,11 @@ interface LiveMapArgs {
   animationEffect?: string;
   /** Live data overlays to show on the interactive map (e.g. "earthquakes"). */
   overlays?: string[];
+  /**
+   * When true, render an ASCILINE-style colored half-block pixel grid (HTML +
+   * ANSI fallback) for hosts that can't iframe the interactive map.
+   */
+  pixel_mode?: boolean;
 }
 
 /** A content block in an MCP tool result. */
@@ -318,6 +337,13 @@ const RENDER_LIVE_MAP_TOOL = {
           enum: ["earthquakes", "uk-crime", "uk-floods", "uk-bikes", "uk-tube"],
         },
       },
+      pixel_mode: {
+        type: "boolean",
+        description:
+          "When true, return an ASCILINE-style colored half-block pixel rendering " +
+          "of the map (HTML widget + ANSI text fallback) for hosts that can't load " +
+          "the interactive iframe.",
+      },
       width: {
         type: "number",
         minimum: 100,
@@ -371,6 +397,62 @@ const MAP_IMAGE_TOOL_DEF = {
     },
     required: ["argsB64"],
   },
+};
+
+/**
+ * `search` tool for the M365 federated connector (read-only). Wraps TomTom
+ * fuzzy search and returns a ranked list of `{ id, title, url }` results — the
+ * deep-research contract Microsoft 365 Copilot's Researcher expects. The `id`
+ * is a self-contained, base64-encoded location ref so `fetch` needs no state.
+ */
+const SEARCH_TOOL_DEF = {
+  name: SEARCH_TOOL,
+  title: "Search places & locations (TomTom)",
+  description:
+    "Search TomTom's global map data for places, businesses, points of interest, and addresses by " +
+    "name or free-text query. Include a place or area for local results. Returns a ranked list of " +
+    "matching locations, each with a stable `id`, a human-readable `title`, and a map `url`. Call " +
+    "`fetch` with a result `id` to get full details (address, coordinates, category, contact) plus " +
+    "a map image. Use for questions like 'coffee shops near Cardiff Castle', 'TomTom HQ Amsterdam', " +
+    "or 'pharmacies in Soho, London'.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      query: {
+        type: "string",
+        description:
+          "What to search for. Include a place/area for local results, e.g. " +
+          "'pharmacy near Paddington Station, London'.",
+      },
+    },
+    required: ["query"],
+  },
+  annotations: { title: "Search places & locations (TomTom)", readOnlyHint: true },
+};
+
+/**
+ * `fetch` tool for the M365 federated connector (read-only). Given an `id` from
+ * `search`, returns the full location record (markdown text + structured
+ * metadata), including a static map image URL and an interactive map link.
+ */
+const FETCH_TOOL_DEF = {
+  name: FETCH_TOOL,
+  title: "Fetch location details (TomTom)",
+  description:
+    "Fetch full details for a single location returned by `search`, given its `id`. Returns the " +
+    "name, full address, coordinates, category and contact info, plus a static map image URL and an " +
+    "interactive map link. Always call `search` first to obtain a valid `id`.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      id: {
+        type: "string",
+        description: "The `id` of a result returned by the `search` tool.",
+      },
+    },
+    required: ["id"],
+  },
+  annotations: { title: "Fetch location details (TomTom)", readOnlyHint: true },
 };
 
 // ---------------------------------------------------------------------------
@@ -638,6 +720,41 @@ function frameDomainsFor(ctx: GatewayContext): string[] {
 }
 
 /**
+ * External origins the embedded interactive map (Static Web App) needs to load
+ * at runtime: the MapLibre / TomTom SDK assets, the TomTom vector tiles + style,
+ * and the public, CORS-enabled overlay data feeds. A strict MCP-Apps host (e.g.
+ * VS Code) applies the widget resource's `connectDomains` / `resourceDomains` to
+ * the whole webview — including the nested SWA frame — so these MUST be listed
+ * or the map renders blank (tiles + scripts blocked). Cowork ignores these and
+ * keeps only `frameDomains`, so listing them is harmless there.
+ */
+const MAP_ASSET_DOMAINS = [
+  "https://api.tomtom.com",
+  "https://unpkg.com",
+  "https://res.cdn.office.net",
+  "https://earthquake.usgs.gov",
+  "https://api.tfl.gov.uk",
+  "https://data.police.uk",
+  "https://environment.data.gov.uk",
+];
+
+/** Domains for the widget resource CSP: the embeddable frame + map runtime assets. */
+function widgetCspDomains(ctx: GatewayContext): {
+  frameDomains: string[];
+  connectDomains: string[];
+  resourceDomains: string[];
+} {
+  const frames = frameDomainsFor(ctx);
+  const assets = Array.from(new Set([...frames, ...MAP_ASSET_DOMAINS]));
+  return {
+    frameDomains: frames,
+    connectDomains: assets,
+    resourceDomains: assets,
+  };
+}
+
+
+/**
  * Re-encodes a base64 map image (often PNG, ~150–400 KB) into a small JPEG so
  * it can be safely inlined as a `data:` URL in the widget HTML. Cowork's widget
  * sandbox won't reliably paint a large `data:` image / oversized resource HTML
@@ -663,6 +780,142 @@ async function shrinkToJpegDataUrl(
   } catch {
     return original;
   }
+}
+
+/**
+ * ASCILINE PIXEL Mode — decodes a base64 raster into a Jimp image, downsamples
+ * to `cols × (rows * 2)` and packs every two vertical pixels into one half-block
+ * glyph (`▀`, U+2580): the glyph's foreground colour is the top pixel, the
+ * background colour is the bottom pixel, so visible vertical resolution doubles.
+ *
+ * Returns a self-contained MCP App widget document (SEP-1865) that fits in
+ * Cowork's 64 KiB resource cap. The document inlines the same MCP App SDK and
+ * runs the same `App.connect()` handshake as `buildWidgetHtml` — without that
+ * handshake Cowork's widget host silently times out and the panel never mounts
+ * (see comment on `buildWidgetHtml`). The body is purely static — colored
+ * half-block spans — so the SDK handlers are no-ops.
+ */
+async function rasterToPixelHtml(
+  base64: string,
+  cols = 120,
+  rows = 60,
+  title?: string | null
+): Promise<string> {
+  const buf = Buffer.from(base64, "base64");
+  const img = await Jimp.read(buf);
+  img.resize(cols, rows * 2);
+  const lines: string[] = [];
+  for (let y = 0; y < rows; y++) {
+    const spans: string[] = [];
+    for (let x = 0; x < cols; x++) {
+      const top = Jimp.intToRGBA(img.getPixelColor(x, y * 2));
+      const bot = Jimp.intToRGBA(img.getPixelColor(x, y * 2 + 1));
+      spans.push(
+        `<span style="color:rgb(${top.r},${top.g},${top.b});` +
+          `background:rgb(${bot.r},${bot.g},${bot.b})">▀</span>`
+      );
+    }
+    lines.push(spans.join(""));
+  }
+  const caption = title
+    ? `<div style="color:#9cf;font:11px ui-monospace,Menlo,monospace;margin:4px 0">${escapeHtml(title)}</div>`
+    : "";
+  const sdk = getAppSdkScript();
+  return (
+    `<!doctype html><html><head><meta charset="utf-8">` +
+    `<title>${escapeHtml(title || "Map")}</title></head>` +
+    `<body style="margin:0;background:#000;padding:8px">` +
+    caption +
+    `<pre style="font:8px/8px ui-monospace,Menlo,monospace;` +
+    `letter-spacing:0;margin:0;line-height:8px;white-space:pre">` +
+    lines.join("\n") +
+    `</pre>` +
+    `<script>${sdk}</script>` +
+    `<script>(function(){` +
+      `try{` +
+        `var A=window.App;if(!A){return;}` +
+        `var a=new A(` +
+          `{name:"tomtom-live-map",version:"1.0.0"},` +
+          `{availableDisplayModes:["inline","fullscreen"]},` +
+          `{autoResize:true}` +
+        `);` +
+        `a.ontoolresult=function(){};` +
+        `a.ontoolinput=function(){};` +
+        `a.onhostcontextchanged=function(ctx){` +
+          `try{` +
+            `if(ctx&&ctx.theme){document.documentElement.style.colorScheme=ctx.theme;}` +
+            `var v=ctx&&ctx.styles&&ctx.styles.variables;` +
+            `if(v){for(var k in v){if(v[k]!=null){document.documentElement.style.setProperty(k,v[k]);}}}` +
+          `}catch(e){}` +
+        `};` +
+        `a.onerror=function(e){try{console.error("mcp-app",e);}catch(_){ }};` +
+        `a.connect().then(function(){},function(e){try{console.error("mcp-app connect failed",e);}catch(_){ }});` +
+      `}catch(e){try{console.error("mcp-app init failed",e);}catch(_){ }}` +
+    `})();</script>` +
+    `</body></html>`
+  );
+}
+
+/**
+ * ANSI 24-bit-colour fallback for the same half-block grid — for hosts that
+ * surface tool text but won't render HTML (terminal-style chats, logs, etc.).
+ */
+async function rasterToPixelAnsi(
+  base64: string,
+  cols = 120,
+  rows = 60
+): Promise<string> {
+  const buf = Buffer.from(base64, "base64");
+  const img = await Jimp.read(buf);
+  img.resize(cols, rows * 2);
+  const out: string[] = [];
+  for (let y = 0; y < rows; y++) {
+    const row: string[] = [];
+    for (let x = 0; x < cols; x++) {
+      const top = Jimp.intToRGBA(img.getPixelColor(x, y * 2));
+      const bot = Jimp.intToRGBA(img.getPixelColor(x, y * 2 + 1));
+      row.push(
+        `\x1b[38;2;${top.r};${top.g};${top.b}m` +
+          `\x1b[48;2;${bot.r};${bot.g};${bot.b}m▀`
+      );
+    }
+    out.push(row.join("") + "\x1b[0m");
+  }
+  return out.join("\n");
+}
+
+function escapeHtml(s: string): string {
+  return s.replace(/[&<>"']/g, (c) =>
+    c === "&" ? "&amp;" :
+    c === "<" ? "&lt;" :
+    c === ">" ? "&gt;" :
+    c === '"' ? "&quot;" : "&#39;"
+  );
+}
+
+/** Fetches a raw (un-shrunk) base64 PNG from the upstream map tool. */
+async function fetchRawMapBase64(
+  ctx: GatewayContext,
+  tool: string,
+  args: Record<string, unknown>
+): Promise<{ base64: string; mimeType: string } | null> {
+  const env = await callMcpRpc(
+    "tools/call",
+    { name: tool, arguments: args },
+    ctx.apiKey,
+    ctx.mcpUrl,
+    1,
+    ctx.mapsBackend
+  );
+  const content = env.result?.content;
+  if (Array.isArray(content)) {
+    for (const b of content as McpBlock[]) {
+      if (b && b.type === "image" && typeof b.data === "string") {
+        return { base64: b.data, mimeType: b.mimeType || "image/png" };
+      }
+    }
+  }
+  return null;
 }
 
 /** Calls the upstream map tool and returns a `data:` URL (JPEG) for the rendered image. */
@@ -791,72 +1044,61 @@ function buildWidgetHtml(
 </body></html>`;
   }
 
-  // The interactive map (SWA / MapLibre) is embedded as a nested iframe. Cowork
-  // honours `frameDomains` (set on the UI resource's `_meta.ui.csp`), and the SWA
-  // is its own origin, so it loads its own tiles and is fully pannable / zoomable
-  // INLINE. An optional pre-rendered `data:` image sits behind it as a poster.
-  const posterHtml = dataUrl
-    ? `<img class="poster" id="poster" alt="${titleHtml}" src="${dataUrl}" />`
-    : "";
-  let slotInner: string;
-  if (liveUrl) {
-    slotInner =
-      `<div class="frame">` +
-      posterHtml +
-      `<iframe class="live" id="live" src="${esc(liveUrl)}" loading="eager" title="${titleHtml}" allow="fullscreen; geolocation"></iframe>` +
-      `</div>`;
-  } else if (dataUrl) {
-    slotInner = `<div class="frame">${posterHtml}</div>`;
-  } else {
-    slotInner = `<div class="msg">Map unavailable.</div>`;
+  // ---- INLINE MAP MODE (production) ------------------------------------
+  // The SWA HTML is inlined directly into the widget response — no nested
+  // cross-origin iframe. This eliminates the double round-trip that blows
+  // Cowork's ~10s render budget. State is injected via window.MAP_STATE
+  // and updated via window.applyMapState() from ontoolresult.
+  const mapAssets = getInteractiveMapAssets();
+
+  // Build MAP_STATE from the same conversion that buildInteractiveUrl uses
+  const mapState: Record<string, unknown> = {};
+  if (baked) {
+    const a = dynamicArgsToLive(baked.args);
+    let center: { lat: number; lon: number } | undefined = a.center;
+    if (!center && Array.isArray(a.markers) && a.markers.length > 0) {
+      center = a.markers[0];
+    } else if (!center && a.route && a.route.origin) {
+      center = a.route.origin;
+    }
+    if (center) mapState.center = `${center.lat},${center.lon}`;
+    if (a.zoom != null) mapState.zoom = String(a.zoom);
+    if (Array.isArray(a.markers) && a.markers.length > 0) {
+      const markers = a.markers.map((m) => ({ lat: m.lat, lon: m.lon, label: m.label }));
+      mapState.markers = base64Json(markers);
+    }
+    if (a.route && a.route.origin && a.route.destination) {
+      const pts = [
+        a.route.origin,
+        ...(Array.isArray(a.route.waypoints) ? a.route.waypoints : []),
+        a.route.destination,
+      ].map((p) => [p.lat, p.lon]);
+      mapState.route = base64Json({ points: pts });
+    }
+    if (a.traffic) mapState.traffic = true;
+    if (a.title) mapState.title = a.title;
+    if (Array.isArray(a.overlays) && a.overlays.length > 0) {
+      mapState.overlay = a.overlays.map((o) => String(o).trim().toLowerCase()).join(",");
+    }
   }
-  const goStyle = liveUrl ? "" : ' style="display:none"';
+  if (ctx.mapClientKey) mapState.apiKey = ctx.mapClientKey;
+
+  const mapStateJson = JSON.stringify(mapState).replace(/</g, "\\u003c");
 
   return `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>TomTom Live Map</title>
-<style>
-  :root { color-scheme: light dark; }
-  * { box-sizing: border-box; }
-  html,body { margin:0; padding:0; font-family:'Segoe UI',system-ui,sans-serif; }
-  .wrap { padding:8px; }
-  .title { font-size:14px; font-weight:600; margin:2px 4px 8px; }
-  .hdr { display:flex; align-items:center; gap:8px; font-size:14px; font-weight:600; color:#fff; background:#E2231A; padding:8px 12px; border-radius:8px 8px 0 0; }
-  .hdr .dot { width:10px; height:10px; border-radius:50%; background:#fff; display:inline-block; }
-  .map { width:100%; border:0; border-radius:10px; overflow:hidden; background:#eef1f5; display:block; }
-  .frame { width:100%; aspect-ratio: 8 / 5; min-height:320px; position:relative; border-radius:0 0 10px 10px; overflow:hidden; background:#eef1f5; }
-  .frame .poster { position:absolute; inset:0; width:100%; height:100%; object-fit:cover; z-index:0; }
-  .frame .live { position:absolute; inset:0; width:100%; height:100%; border:0; z-index:1; background:transparent; }
-  img.map { object-fit:cover; }
-  .ctrls { position:absolute; top:10px; right:10px; display:flex; flex-direction:column; gap:6px; z-index:4; }
-  .ctrls button { width:34px; height:34px; border:0; border-radius:8px; background:rgba(255,255,255,.92); color:#111; font-size:18px; font-weight:700; line-height:1; cursor:pointer; box-shadow:0 1px 4px rgba(0,0,0,.35); }
-  .ctrls button:hover, .pad button:hover { background:#fff; }
-  .pad { position:absolute; bottom:10px; right:10px; display:grid; grid-template-columns:repeat(3,30px); grid-template-rows:repeat(3,30px); gap:3px; z-index:4; }
-  .pad button { border:0; border-radius:7px; background:rgba(255,255,255,.92); color:#111; font-size:11px; line-height:1; cursor:pointer; box-shadow:0 1px 4px rgba(0,0,0,.3); padding:0; }
-  .pad button[data-act=up]{ grid-column:2; grid-row:1; }
-  .pad button[data-act=left]{ grid-column:1; grid-row:2; }
-  .pad button[data-act=right]{ grid-column:3; grid-row:2; }
-  .pad button[data-act=down]{ grid-column:2; grid-row:3; }
-  .spin { position:absolute; left:10px; top:10px; background:rgba(0,0,0,.6); color:#fff; font-size:11px; padding:3px 8px; border-radius:6px; z-index:5; }
-  .bar { display:flex; gap:8px; align-items:center; margin-top:8px; }
-  button.go { border:0; border-radius:8px; padding:8px 14px; cursor:pointer; font-size:13px; font-weight:600; background:#E2231A; color:#fff; }
-  .msg { padding:16px; font-size:13px; color:#666; }
-</style>
+<title>${titleHtml}</title>
+${mapAssets.headHtml}
 </head>
 <body>
-<div class="wrap">
-  <div class="hdr"><span class="dot"></span><span id="t">${titleHtml}</span></div>
-  <div id="slot">${slotInner}</div>
-  <div class="bar"><button class="go" id="go"${goStyle}>Expand to full screen</button></div>
-</div>
+<script>window.MAP_STATE = ${mapStateJson};</script>
+${mapAssets.bodyHtml}
 <script>${sdk}</script>
 <script>
 (function(){
-  var INIT = ${init};
-  var tEl = document.getElementById('t');
   var go = document.getElementById('go');
   var curMode = 'inline';
   function setGoLabel(){ if(go){ go.textContent = (curMode === 'fullscreen') ? 'Exit full screen' : 'Expand to full screen'; } }
@@ -868,9 +1110,6 @@ function buildWidgetHtml(
     } catch(e){}
   }
 
-  // The map is the embedded SWA iframe; it renders regardless of the handshake.
-  // The official ext-apps App SDK (inlined above as window.App) drives the
-  // SEP-1865 lifecycle so Cowork mounts us and clears the loading skeleton.
   var App = window.App;
   if(!App){ return; }
 
@@ -880,14 +1119,11 @@ function buildWidgetHtml(
     { autoResize: true }
   );
 
-  // Register handlers BEFORE connect() so no early notifications are missed.
   app.ontoolresult = function(res){
     try {
       var sc = res && res.structuredContent;
-      if(sc && sc.title && tEl){ tEl.textContent = sc.title; }
-      if(sc && sc.interactiveUrl){
-        var f = document.getElementById('live');
-        if(f && f.getAttribute('src') !== sc.interactiveUrl){ f.setAttribute('src', sc.interactiveUrl); }
+      if(sc && typeof window.applyMapState === 'function'){
+        window.applyMapState(sc);
       }
     } catch(e){}
   };
@@ -923,6 +1159,225 @@ function buildWidgetHtml(
 // Method handlers
 // ---------------------------------------------------------------------------
 
+/** Returns the first text content block from an upstream JSON-RPC tool result. */
+function firstTextBlock(env: JsonRpcResponse): string | null {
+  const c = env.result?.content;
+  if (Array.isArray(c)) {
+    for (const b of c as McpBlock[]) {
+      if (b && b.type === "text" && typeof b.text === "string") return b.text;
+    }
+  }
+  return null;
+}
+
+/** A self-contained location reference encoded into a `search` result id. */
+interface LocationRef {
+  lat: number;
+  lon: number;
+  name: string;
+  address?: string;
+  category?: string;
+  phone?: string;
+  website?: string;
+}
+
+/** Decodes a (URL-safe) base64 `search` result id back into a LocationRef. */
+function decodeLocationRef(id: string): LocationRef | null {
+  try {
+    const safe = id.replace(/-/g, "+").replace(/_/g, "/");
+    const parsed = JSON.parse(Buffer.from(safe, "base64").toString("utf-8")) as Record<
+      string,
+      unknown
+    >;
+    const hasName = parsed && typeof parsed.name === "string";
+    if (hasName && isLatLon(parsed)) return parsed as unknown as LocationRef;
+  } catch {
+    /* fall through */
+  }
+  return null;
+}
+
+/**
+ * Federated-connector `search`: wraps TomTom fuzzy search and returns the
+ * deep-research `{ results: [{ id, title, url }] }` shape Microsoft 365 Copilot
+ * expects. Each `id` encodes the location so `fetch` is stateless.
+ */
+async function handleSearch(
+  ctx: GatewayContext,
+  id: number | string | null,
+  args: Record<string, unknown>
+): Promise<JsonRpcResponse> {
+  const query = String(args?.query ?? "").trim();
+  if (!query) {
+    return {
+      jsonrpc: "2.0",
+      id,
+      result: {
+        content: [{ type: "text", text: '{"results":[]}' }],
+        structuredContent: { results: [] },
+        isError: false,
+      },
+    };
+  }
+
+  const env = await callMcpRpc(
+    "tools/call",
+    { name: "tomtom-fuzzy-search", arguments: { query, limit: 8 } },
+    ctx.apiKey,
+    ctx.mcpUrl,
+    id ?? 1,
+    ctx.mapsBackend
+  );
+
+  const results: Array<{ id: string; title: string; url: string }> = [];
+  const text = firstTextBlock(env);
+  if (text) {
+    try {
+      const fc = JSON.parse(text) as { features?: unknown[] };
+      const feats = Array.isArray(fc.features) ? fc.features : [];
+      for (const raw of feats) {
+        const f = raw as Record<string, unknown>;
+        const geom = f.geometry as { coordinates?: number[] } | undefined;
+        const coords = geom?.coordinates;
+        if (!Array.isArray(coords) || coords.length < 2) continue;
+        const lon = Number(coords[0]);
+        const lat = Number(coords[1]);
+        if (!Number.isFinite(lat) || !Number.isFinite(lon)) continue;
+
+        const p = (f.properties as Record<string, unknown>) || {};
+        const poi = (p.poi as Record<string, unknown>) || {};
+        const addr = (p.address as Record<string, unknown>) || {};
+        const name =
+          (typeof poi.name === "string" && poi.name) ||
+          (typeof addr.freeformAddress === "string" && addr.freeformAddress) ||
+          (typeof p.type === "string" && p.type) ||
+          "Location";
+        const address =
+          typeof addr.freeformAddress === "string" ? addr.freeformAddress : undefined;
+        const category =
+          Array.isArray(poi.categories) && typeof poi.categories[0] === "string"
+            ? (poi.categories[0] as string)
+            : undefined;
+        const ref: LocationRef = {
+          lat,
+          lon,
+          name,
+          address,
+          category,
+          phone: typeof poi.phone === "string" ? poi.phone : undefined,
+          website: typeof poi.url === "string" ? poi.url : undefined,
+        };
+        const rid = base64Json(ref);
+        const title = address && address !== name ? `${name} \u2014 ${address}` : name;
+        const url =
+          buildInteractiveUrl(ctx, {
+            title: name,
+            center: { lat, lon },
+            zoom: 16,
+            markers: [{ lat, lon, label: name }],
+          }) ?? buildImageUrl(ctx, "tomtom-dynamic-map", buildDynamicMapArgs({ center: { lat, lon }, zoom: 16 }));
+        results.push({ id: rid, title, url });
+      }
+    } catch {
+      /* leave results empty on parse failure */
+    }
+  }
+
+  const payload = { results };
+  return {
+    jsonrpc: "2.0",
+    id,
+    result: {
+      content: [{ type: "text", text: JSON.stringify(payload) }],
+      structuredContent: payload,
+      isError: false,
+    },
+  };
+}
+
+/**
+ * Federated-connector `fetch`: given a `search` result `id`, returns the full
+ * location record as markdown (Copilot cites this) plus structured metadata,
+ * including a static map image URL and an interactive map link.
+ */
+async function handleFetch(
+  ctx: GatewayContext,
+  id: number | string | null,
+  args: Record<string, unknown>
+): Promise<JsonRpcResponse> {
+  const refId = String(args?.id ?? "");
+  const ref = decodeLocationRef(refId);
+  if (!ref) {
+    return {
+      jsonrpc: "2.0",
+      id,
+      error: { code: -32602, message: "Invalid id. Call `search` first to obtain a result id." },
+    };
+  }
+
+  const { lat, lon, name, address, category, phone, website } = ref;
+  const mapArgs = buildDynamicMapArgs({
+    title: name,
+    center: { lat, lon },
+    zoom: 16,
+    markers: [
+      {
+        lat,
+        lon,
+        label: name,
+        ...(category ? { category } : {}),
+        ...(address ? { address } : {}),
+      },
+    ],
+  });
+  const imageUrl = buildImageUrl(ctx, "tomtom-dynamic-map", mapArgs);
+  const liveUrl = buildInteractiveUrl(ctx, {
+    title: name,
+    center: { lat, lon },
+    zoom: 16,
+    markers: [{ lat, lon, label: name }],
+  });
+
+  const lines: string[] = [`# ${name}`, ""];
+  if (address) lines.push(`**Address:** ${address}`);
+  lines.push(`**Coordinates:** ${lat.toFixed(5)}, ${lon.toFixed(5)}`);
+  if (category) lines.push(`**Category:** ${category}`);
+  if (phone) lines.push(`**Phone:** ${phone}`);
+  if (website) lines.push(`**Website:** ${website}`);
+  lines.push("");
+  lines.push(`![${name}](${imageUrl})`);
+  if (liveUrl) lines.push("", `[Open the interactive map](${liveUrl})`);
+  const text = lines.join("\n");
+
+  const doc = {
+    id: refId,
+    title: name,
+    text,
+    url: liveUrl ?? imageUrl,
+    metadata: {
+      latitude: lat,
+      longitude: lon,
+      address: address ?? null,
+      category: category ?? null,
+      phone: phone ?? null,
+      website: website ?? null,
+      imageUrl,
+      interactiveUrl: liveUrl ?? null,
+      source: "TomTom",
+    },
+  };
+
+  return {
+    jsonrpc: "2.0",
+    id,
+    result: {
+      content: [{ type: "text", text }],
+      structuredContent: doc,
+      isError: false,
+    },
+  };
+}
+
 async function renderLiveMapResult(
   ctx: GatewayContext,
   id: number | string | null,
@@ -945,6 +1400,39 @@ async function renderLiveMapResult(
     : buildImageUrl(ctx, "tomtom-dynamic-map", dynamicArgs);
   const liveUrl = buildInteractiveUrl(ctx, a) ?? null;
   const title = a.title ? String(a.title) : "Map";
+
+  // ASCILINE PIXEL Mode: when the widget host can't load the iframe, render a
+  // colored half-block raster (HTML for hosts that allow text/html resources;
+  // 24-bit ANSI inline text as a guaranteed fallback). The HTML is cached on
+  // the session so handleResourcesRead can serve it without re-fetching.
+  if (a.pixel_mode === true) {
+    try {
+      const raw = await fetchRawMapBase64(ctx, "tomtom-dynamic-map", dynamicArgs);
+      if (raw) {
+        const pixelHtml = await rasterToPixelHtml(raw.base64, 120, 60, title);
+        const ansi = await rasterToPixelAnsi(raw.base64, 120, 60);
+        rememberMap(ctx.sessionId, "tomtom-dynamic-map", dynamicArgs, null, liveUrl, title, pixelHtml);
+        const linkLine = liveUrl ? `\n\nInteractive: ${liveUrl}` : "";
+        return {
+          jsonrpc: "2.0",
+          id,
+          result: {
+            content: [{ type: "text", text: ansi + linkLine }],
+            structuredContent: { title, interactiveUrl: liveUrl, pixel_mode: true },
+            isError: false,
+            _meta: {
+              ui: { resourceUri: UI_RESOURCE_STATIC },
+              "openai/outputTemplate": UI_RESOURCE_STATIC,
+            },
+          },
+        };
+      }
+    } catch (err) {
+      console.warn("mcpGateway: pixel_mode render failed:", err);
+      // fall through to the normal widget/inline path below
+    }
+  }
+
   const widget = ctx.widgetEnabled === true;
 
   // Build the base result. `structuredContent` (compact) feeds both the agent and
@@ -1076,6 +1564,10 @@ async function handleToolsList(
   tools.push(renderTool);
   tools.push(MAP_IMAGE_TOOL_DEF as unknown as Record<string, unknown>);
 
+  // Federated-connector tools (M365 Copilot enables only `search` + `fetch`).
+  tools.push(SEARCH_TOOL_DEF as unknown as Record<string, unknown>);
+  tools.push(FETCH_TOOL_DEF as unknown as Record<string, unknown>);
+
   return { jsonrpc: "2.0", id, result: { tools } };
 }
 
@@ -1098,6 +1590,14 @@ async function handleToolsCall(
 
   if (name === RENDER_LIVE_MAP) {
     return await renderLiveMapResult(ctx, id, args);
+  }
+
+  if (name === SEARCH_TOOL) {
+    return await handleSearch(ctx, id, args);
+  }
+
+  if (name === FETCH_TOOL) {
+    return await handleFetch(ctx, id, args);
   }
 
   if (name === MAP_IMAGE_TOOL) {
@@ -1328,6 +1828,7 @@ async function handleResourcesRead(
           dataUrl?: string | null;
           liveUrl?: string | null;
           title?: string | null;
+          pixelHtml?: string | null;
         }
       | null = null;
     const match = uri.match(/\/live-map\/(.+?)\.html$/);
@@ -1344,15 +1845,37 @@ async function handleResourcesRead(
           dataUrl: recalled.dataUrl,
           liveUrl: recalled.liveUrl,
           title: recalled.title,
+          pixelHtml: recalled.pixelHtml,
         };
     }
     console.log(
       `mcpGateway: live-map widget session=${ctx.sessionId ?? "-"} baked=${
         baked ? "yes" : "no"
-      } liveUrl=${baked && baked.liveUrl ? "yes" : "no"}`
+      } liveUrl=${baked && baked.liveUrl ? "yes" : "no"} pixel=${
+        baked && baked.pixelHtml ? "yes" : "no"
+      }`
     );
+
+    // PIXEL Mode short-circuit: serve the pre-rendered half-block HTML directly
+    // so the widget host doesn't need to load the interactive SWA iframe.
+    if (baked && baked.pixelHtml) {
+      return {
+        jsonrpc: "2.0",
+        id,
+        result: {
+          contents: [
+            {
+              uri,
+              mimeType: UI_MIME,
+              text: baked.pixelHtml,
+            },
+          ],
+        },
+      };
+    }
+
     const html = buildWidgetHtml(ctx, baked);
-    const domains = frameDomainsFor(ctx);
+    const csp = widgetCspDomains(ctx);
     console.log(
       `mcpGateway: live-map html bytes=${html.length} dataUrlBytes=${
         baked && baked.dataUrl ? baked.dataUrl.length : 0
@@ -1370,9 +1893,9 @@ async function handleResourcesRead(
             _meta: {
               ui: {
                 csp: {
-                  frameDomains: domains,
-                  connectDomains: domains,
-                  resourceDomains: domains,
+                  frameDomains: csp.frameDomains,
+                  connectDomains: csp.connectDomains,
+                  resourceDomains: csp.resourceDomains,
                 },
               },
             },

@@ -4,6 +4,7 @@ import generateMapCard from "./functions/generateMapCard";
 import getMapImage from "./functions/getMapImage";
 import getMapAnimation from "./functions/getMapAnimation";
 import { mcpGateway, mcpGatewayProbe, mcpDiag } from "./functions/mcpGateway";
+import { requireEntraAuth } from "./lib/entraAuth";
 
 const app = express();
 const PORT = parseInt(process.env.PORT || "3001", 10);
@@ -36,6 +37,12 @@ app.get("/api/get-map-animation", getMapAnimation);
 // MCP gateway for Microsoft Copilot Cowork (Streamable HTTP, JSON-RPC 2.0)
 app.post("/api/mcp", mcpGateway);
 app.get("/api/mcp", mcpGatewayProbe);
+
+// MCP endpoint for the Microsoft 365 Copilot custom federated connector. Same
+// gateway handler (exposes the read-only `search` + `fetch` tools), but guarded
+// by Microsoft Entra access-token validation. Point the connector's Base URL here.
+app.post("/api/connector", requireEntraAuth, mcpGateway);
+app.get("/api/connector", requireEntraAuth, mcpGatewayProbe);
 
 // Diagnostic beacon for the Cowork widget (logs to server console).
 app.get("/api/diag", mcpDiag);

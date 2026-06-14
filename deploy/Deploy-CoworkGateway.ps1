@@ -46,10 +46,17 @@ param(
     [string]$MapsBackend = "tomtom-orbis-maps",
 
     # Advertise the MCP Apps (SEP-1865) interactive widget on render_live_map.
-    # Default OFF: Cowork's widget-renderer host times out in the current preview
-    # build, so we ship the reliable clickable inline image instead. Turn this on
-    # to demo / re-test the native widget.
-    [switch]$EnableCoworkWidget
+    # Default ON (native widget). Use -DisableCoworkWidget to fallback to static image.
+    [switch]$DisableCoworkWidget,
+
+    # --- M365 Copilot custom federated connector (Entra SSO) on /api/connector ---
+    # Enforce Microsoft Entra access-token validation on the /api/connector route.
+    [switch]$RequireEntraAuth,
+    # Directory (tenant) GUID that issues the connector's access tokens.
+    [string]$EntraTenantId,
+    # Expected token audience(s): the Application ID URI from the Teams Developer
+    # Portal SSO registration (e.g. api://<host>/<appId>). Comma-separate to allow many.
+    [string]$ConnectorAudience
 )
 
 $ErrorActionPreference = "Stop"
@@ -98,7 +105,7 @@ $envVars = @(
     "TOMTOM_API_KEY=secretref:tomtom-api-key",
     "MCP_SERVER_URL=$McpServerUrl",
     "MCP_MAPS_BACKEND=$MapsBackend",
-    "ENABLE_COWORK_WIDGET=$($EnableCoworkWidget.IsPresent.ToString().ToLower())",
+    "ENABLE_COWORK_WIDGET=$(-not $DisableCoworkWidget.IsPresent)",
     "INTERACTIVE_MAP_URL=$InteractiveMapUrl",
     "PUBLIC_BASE_URL=$publicBase"
 )
@@ -107,6 +114,10 @@ if ($MapClientKey) {
         --secrets "map-client-key=$MapClientKey" -o none
     $envVars += "MAP_CLIENT_KEY=secretref:map-client-key"
 }
+# Federated connector (Entra SSO) auth on /api/connector.
+$envVars += "REQUIRE_ENTRA_AUTH=$($RequireEntraAuth.IsPresent.ToString().ToLower())"
+if ($EntraTenantId)     { $envVars += "ENTRA_TENANT_ID=$EntraTenantId" }
+if ($ConnectorAudience) { $envVars += "CONNECTOR_AUDIENCE=$ConnectorAudience" }
 az containerapp update --name $ContainerAppName --resource-group $ResourceGroupName `
     --set-env-vars $envVars -o none
 
