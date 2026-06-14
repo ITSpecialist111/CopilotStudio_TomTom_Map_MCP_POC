@@ -392,4 +392,52 @@ mounts + spinner, then host abort at ~10 s. Widget‑off test (Statue of Liberty
 result, **no banner**, correct Orbis‑backed interactive link. `MCP_MAPS_BACKEND: tomtom-orbis-maps`
 confirmed in container startup logs.
 
+## Entry 13 — Inlined SWA HTML widget + traffic overlay fixes (2026‑06‑14)
+
+**Objective:** Enable the interactive map widget by default in Cowork without the 10 s SDK handshake timeout.
+
+**Root cause:** The widget was using a **nested cross-origin iframe** pointing to the Static Web App. This 
+double round-trip (widget HTML → SWA HTML → MapLibre + style JSON + tiles + SDK handshake) exceeded 
+Cowork's ~10 s budget and triggered "widget didn't respond in time."
+
+**Solution:** **Inline the SWA HTML directly** into the widget response, eliminating the nested iframe and 
+the extra round-trip. The interactive map app now reads its initial state from a **`window.MAP_STATE` 
+global** instead of URL parameters.
+
+**Implementation:**
+- New file **`map-proxy-api/src/lib/interactiveMapHtml.ts`** — reads `interactive-map-app/index.html` 
+  at startup (cached), transforms URL-param parsing to `window.MAP_STATE`, exports `getInteractiveMapAssets()` 
+  with head/body HTML splits.
+- **`map-proxy-api/Dockerfile`** — added `COPY interactive-map-app/ ./interactive-map-app/` so the SWA 
+  is available in the container at runtime.
+- **`map-proxy-api/src/lib/mcpGateway.ts`** — rewritten `buildWidgetHtml`:
+  - Removed nested `<iframe class="live">` pointing to the SWA.
+  - Inlined `getInteractiveMapAssets().headHtml` into `<head>`, `.bodyHtml` in place of iframe.
+  - Emits `<script>window.MAP_STATE = ${stateJson};</script>` before SWA script runs.
+  - App SDK handshake unchanged; on `ontoolresult`, calls `window.applyMapState(...)` to mutate map state.
+  - Added traffic overlay fixes: removed invalid `&thickness` param, added `typeof map.showTrafficFlow === 
+    'function'` guard for MapLibre GL fallback.
+- **`deploy/Deploy-CoworkGateway.ps1`** — inverted widget enablement logic:
+  - Changed parameter from `[switch]$EnableCoworkWidget` to `[switch]$DisableCoworkWidget` (default: off, 
+    widget enabled).
+  - Changed env-var assignment to `"ENABLE_COWORK_WIDGET=$(-not $DisableCoworkWidget.IsPresent)"` so 
+    widget enabled by default on each deploy.
+  - Fixed repeated deploy bug where widget was resetting to `false`.
+- **`interactive-map-app/index.html`** — removed ASCII/pixel render-mode UI (button + cycling logic).
+
+**Changed files:** `map-proxy-api/src/lib/interactiveMapHtml.ts` (new), `map-proxy-api/Dockerfile`, 
+`map-proxy-api/src/lib/mcpGateway.ts`, `deploy/Deploy-CoworkGateway.ps1`, `interactive-map-app/index.html`.
+
+**Build:** `npm run build` → exit 0, no TypeScript errors; deployed via `Deploy-CoworkGateway.ps1`.
+
+**Verification (live Cowork):**
+- **Barry Island map test:** Widget renders inline, fully interactive (pan, zoom, theme toggle works).
+- **Traffic overlay:** Live traffic raster tiles render correctly; toggle works.
+- **Fallback:** On error, static pre-rendered image displays instead of blank.
+- **No timeout:** Widget completes SDK handshake well within 10 s budget; no "didn't respond in time" 
+  banner.
+
+**Result:** Interactive TomTom maps render reliably in Cowork with full zoom/pan/traffic interactivity 
+directly in the chat panel. Confirmed working end‑to‑end with `tomtom-live-map` skill.
+
 
